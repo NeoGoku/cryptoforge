@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import { game } from './game';
 import { gadgetDef, roomDef } from './config';
 import type { RoomDef } from './config';
+import { sfx } from './audio';
 
 const TW = 64;
 const TH = 32;
@@ -12,6 +13,7 @@ let zoom = 1;
 
 type G = Phaser.GameObjects.Graphics;
 type Pt = { x: number; y: number };
+type LedFn = (x: number, y: number, c: number, phase: number) => void;
 
 /** Kachel (u,v) mit Höhe z in Bildschirmkoordinaten (isometrisch). */
 const P = (u: number, v: number, z = 0): Pt => ({
@@ -26,29 +28,43 @@ const shade = (c: number, f: number): number => {
 
 const line = (g: G, a: Pt, b: Pt) => g.lineBetween(a.x, a.y, b.x, b.y);
 
-/** Quader mit Basis z0 und Höhe h. Sichtbar: Oberseite, Front-Flächen. */
-function box(g: G, u: number, v: number, du: number, dv: number, h: number, c: number, z0 = 0) {
+/** Quader mit Basis z0 und Höhe h. Sichtbar: Oberseite und die beiden Frontflächen. */
+function box(g: G, u: number, v: number, du: number, dv: number, h: number, c: number, z0 = 0, vents = 0) {
   const t = z0 + h;
   const top = [P(u, v, t), P(u + du, v, t), P(u + du, v + dv, t), P(u, v + dv, t)];
   const right = [P(u + du, v, z0), P(u + du, v + dv, z0), P(u + du, v + dv, t), P(u + du, v, t)];
   const left = [P(u, v + dv, z0), P(u + du, v + dv, z0), P(u + du, v + dv, t), P(u, v + dv, t)];
-  g.fillStyle(shade(c, 0.78), 1);
+  g.fillStyle(shade(c, 0.74), 1);
   g.fillPoints(left, true);
-  g.fillStyle(shade(c, 0.92), 1);
+  g.fillStyle(shade(c, 0.9), 1);
   g.fillPoints(right, true);
-  g.fillStyle(shade(c, 1.15), 1);
+  g.fillStyle(shade(c, 1.18), 1);
   g.fillPoints(top, true);
-  g.lineStyle(1, 0x000000, 0.25);
+  g.lineStyle(1, 0x000000, 0.35);
   g.strokePoints(top, true);
+  g.strokePoints(left, true);
+  g.strokePoints(right, true);
+  g.lineStyle(1, 0xffffff, 0.22);
+  line(g, top[3], top[2]);
+  line(g, top[2], top[1]);
+  if (vents > 0) {
+    g.lineStyle(1, 0x000000, 0.4);
+    for (let k = 1; k <= vents; k++) {
+      const z = z0 + (h * k) / (vents + 1);
+      line(g, P(u, v + dv, z), P(u + du, v + dv, z));
+      line(g, P(u + du, v, z), P(u + du, v + dv, z));
+    }
+  }
 }
 
-type Kind = 'bed' | 'desk' | 'rack' | 'plant' | 'crate' | 'bench';
+type Kind = 'bed' | 'desk' | 'rack' | 'plant' | 'crate' | 'bench' | 'chair';
 interface Deco { kind: Kind; u: number; v: number; du: number; dv: number; }
 
 const DECOR: Record<string, Deco[]> = {
   kid: [
     { kind: 'bed', u: 0.4, v: 0.3, du: 2.0, dv: 1.6 },
     { kind: 'desk', u: 3.6, v: 0.2, du: 2.0, dv: 1.0 },
+    { kind: 'chair', u: 4.0, v: 1.5, du: 0.9, dv: 0.9 },
     { kind: 'rack', u: 0.3, v: 2.4, du: 0.9, dv: 0.9 },
     { kind: 'plant', u: 5.0, v: 4.9, du: 0.7, dv: 0.7 },
   ],
@@ -67,160 +83,348 @@ const DECOR: Record<string, Deco[]> = {
   ],
 };
 
-function drawDeco(g: G, d: Deco) {
+function drawDeco(g: G, d: Deco, led: LedFn) {
   const { u, v, du, dv } = d;
   switch (d.kind) {
     case 'bed':
       box(g, u, v, du, dv, 10, 0x8c90c0);
       box(g, u + 0.1, v + 0.1, du * 0.35, dv - 0.2, 6, 0xf2f2f7, 10);
+      box(g, u + du * 0.5, v + 0.05, du * 0.48, dv - 0.1, 3, 0x6d73b0, 10);
       break;
     case 'desk':
-      box(g, u, v, du, dv, 16, 0x8c90c0);
+      box(g, u, v, du, dv, 16, 0x8c90c0, 0, 1);
       box(g, u + du - 0.55, v + 0.15, 0.4, 0.6, 28, 0x2b2e36, 16);
       box(g, u + 0.3, v + 0.1, du - 1.2, 0.14, 26, 0x1f2430, 16);
+      led(P(u + 0.3 + (du - 1.2) / 2, v + 0.24, 33).x, P(u + 0.3 + (du - 1.2) / 2, v + 0.24, 33).y, 0x5dff9c, 0.5);
+      break;
+    case 'chair':
+      box(g, u, v, du, dv, 8, 0x4a4f78);
+      box(g, u, v + dv - 0.12, du, 0.12, 14, 0x3a3e62, 8);
       break;
     case 'rack':
-      box(g, u, v, du, dv, 62, 0x3a3d44);
+      box(g, u, v, du, dv, 62, 0x3a3d44, 0, 6);
+      for (let k = 1; k <= 6; k++) {
+        const p = P(u + du * 0.82, v + dv, (62 * k) / 7);
+        led(p.x, p.y, k % 3 === 0 ? 0xffc857 : 0x4fd1c5, k * 0.9 + u);
+      }
       break;
     case 'crate':
-      box(g, u, v, du, dv, 22, 0xb8862b);
+      box(g, u, v, du, dv, 22, 0xb8862b, 0, 2);
       break;
     case 'bench':
-      box(g, u, v, du, dv, 20, 0x6b5a4a);
+      box(g, u, v, du, dv, 20, 0x6b5a4a, 0, 1);
+      box(g, u + 0.3, v + 0.2, 0.5, 0.5, 8, 0x9aa0b4, 20);
       break;
     case 'plant': {
       box(g, u, v, du, dv, 12, 0xa0522d);
       const c = P(u + du / 2, v + dv / 2, 12);
-      g.fillStyle(0x3e9142, 1);
+      g.fillStyle(0x2d7a37, 1);
       g.fillCircle(c.x, c.y - 12 * zoom, 15 * zoom);
       g.fillStyle(0x4caf50, 1);
       g.fillCircle(c.x - 5 * zoom, c.y - 18 * zoom, 10 * zoom);
+      g.fillStyle(0x7ed67f, 0.8);
+      g.fillCircle(c.x - 8 * zoom, c.y - 22 * zoom, 4 * zoom);
       break;
     }
   }
 }
 
 interface Led { x: number; y: number; c: number; phase: number; }
-interface Hit { x: number; y: number; idx: number; }
+interface Fan { x: number; y: number; hot: boolean; }
+interface Hit { x: number; y: number; idx: number; poly: Pt[]; }
+interface Part { x: number; y: number; vx: number; vy: number; life: number; max: number; c: number; r: number; ring?: boolean; }
 
 export class MainScene extends Phaser.Scene {
-  private bg!: G;
   private room!: G;
-  private leds!: G;
+  private dyn!: G;
   private ledPts: Led[] = [];
+  private fans: Fan[] = [];
   private hits: Hit[] = [];
+  private parts: Part[] = [];
+  private dust: { x: number; y: number; s: number; sp: number; ph: number }[] = [];
+  private hover = -1;
   private t = 0;
+  private fanAngle = 0;
+  private spawnAcc = 0;
+  private sparkAcc = 0;
+  private humTimer = 0;
+  private lastRoom = '';
+  private charPos: Pt | null = null;
 
   constructor() {
     super('main');
   }
 
   create() {
-    this.bg = this.add.graphics();
     this.room = this.add.graphics();
-    this.leds = this.add.graphics();
+    this.dyn = this.add.graphics();
+    for (let i = 0; i < 46; i++) {
+      this.dust.push({ x: Math.random(), y: Math.random(), s: 1 + Math.random() * 2, sp: 0.01 + Math.random() * 0.03, ph: Math.random() * 6 });
+    }
     this.input.on('pointerdown', (p: Phaser.Input.Pointer) => this.onPress(p));
+    this.input.on('pointermove', (p: Phaser.Input.Pointer) => {
+      const h = this.findHit(p);
+      this.hover = h ? h.idx : -1;
+      this.input.setDefaultCursor(h ? 'pointer' : 'default');
+    });
     this.scale.on('resize', () => this.refresh());
     game.on('change', () => this.refresh());
     this.refresh();
   }
 
   update(_time: number, delta: number) {
-    game.update(delta / 1000);
-    this.t += delta / 1000;
+    const dt = delta / 1000;
+    game.update(dt);
+    this.t += dt;
     const powered = game.s.cash > 0;
-    this.leds.clear();
+    const w = this.scale.width;
+    const h = this.scale.height;
+    const g = this.dyn;
+    g.clear();
+
+    // Schwebende Partikel im Hintergrund
+    for (const d of this.dust) {
+      d.y -= d.sp * dt;
+      if (d.y < -0.02) { d.y = 1.02; d.x = Math.random(); }
+      g.fillStyle(0x4fd1c5, 0.12 + 0.12 * Math.sin(this.t * 1.4 + d.ph));
+      g.fillCircle(d.x * w + Math.sin(this.t * 0.5 + d.ph) * 10, d.y * h, d.s);
+    }
+
+    // Leere Slots: pulsierende Umrandung, Hover-Highlight
+    for (const hit of this.hits) {
+      const slot = game.s.rooms[game.s.active]?.[hit.idx];
+      if (!slot) {
+        g.lineStyle(2, 0x4fd1c5, 0.35 + 0.35 * Math.sin(this.t * 3 + hit.idx));
+        g.strokePoints(hit.poly, true, true);
+        g.fillStyle(0x4fd1c5, 0.06 + 0.05 * Math.sin(this.t * 3 + hit.idx));
+        g.fillPoints(hit.poly, true);
+        const c = hit.poly.reduce((a, p) => ({ x: a.x + p.x / 4, y: a.y + p.y / 4 }), { x: 0, y: 0 });
+        g.lineStyle(2.5 * zoom, 0x4fd1c5, 0.7);
+        g.lineBetween(c.x - 6 * zoom, c.y, c.x + 6 * zoom, c.y);
+        g.lineBetween(c.x, c.y - 4 * zoom, c.x, c.y + 4 * zoom);
+      }
+      if (hit.idx === this.hover) {
+        g.lineStyle(2.5, 0xffffff, 0.8);
+        g.strokePoints(hit.poly, true, true);
+      }
+    }
+
+    // Lüfter
+    const rate = powered ? 9 : 0;
+    this.fanAngle += dt * rate;
+    for (const f of this.fans) {
+      const a = this.fanAngle * (f.hot ? 1.7 : 1);
+      const rx = 17 * zoom;
+      const ry = 8.5 * zoom;
+      g.lineStyle(2.4 * zoom, f.hot ? 0xff9a6b : 0xb8c4e0, powered ? 0.85 : 0.35);
+      for (let k = 0; k < 3; k++) {
+        const ang = a + (k * Math.PI * 2) / 3;
+        g.lineBetween(f.x, f.y, f.x + Math.cos(ang) * rx, f.y + Math.sin(ang) * ry);
+      }
+      g.fillStyle(0x10131c, 1);
+      g.fillCircle(f.x, f.y, 2.5 * zoom);
+    }
+
+    // LEDs
     for (const l of this.ledPts) {
       const pulse = 0.5 + 0.5 * Math.sin(this.t * 5 + l.phase);
-      const a = powered ? 0.45 + 0.55 * pulse : 0.15;
-      this.leds.fillStyle(l.c, a);
-      this.leds.fillCircle(l.x, l.y, 3 * zoom);
-      this.leds.fillStyle(l.c, a * 0.25);
-      this.leds.fillCircle(l.x, l.y, 7 * zoom);
+      const a = powered ? 0.5 + 0.5 * pulse : 0.12;
+      g.fillStyle(l.c, a * 0.22);
+      g.fillCircle(l.x, l.y, 7 * zoom);
+      g.fillStyle(l.c, a);
+      g.fillCircle(l.x, l.y, 2.6 * zoom);
+    }
+
+    // Operator am Schreibtisch
+    if (this.charPos) {
+      const c = this.charPos;
+      const z = zoom;
+      const bob = powered ? Math.sin(this.t * 7) * 0.8 * z : 0;
+      const type = powered ? Math.sin(this.t * 18) * 1.6 * z : 0;
+      g.fillStyle(0x000000, 0.18);
+      g.fillEllipse(c.x, c.y + 2 * z, 18 * z, 7 * z);
+      g.fillStyle(0xa66bd6, 1);
+      g.fillRoundedRect(c.x - 7 * z, c.y - 20 * z + bob, 14 * z, 18 * z, 4 * z);
+      g.lineStyle(3 * z, 0xf0c9a0, 1);
+      g.lineBetween(c.x + 5 * z, c.y - 15 * z + bob, c.x + 13 * z, c.y - 19 * z + type);
+      g.fillStyle(0x1a1a2e, 1);
+      g.fillCircle(c.x, c.y - 29 * z + bob, 8 * z);
+      g.fillStyle(0xf0c9a0, 1);
+      g.fillCircle(c.x + 1 * z, c.y - 26 * z + bob, 6 * z);
+      g.fillStyle(0x1a1a2e, 1);
+      g.fillCircle(c.x - 3 * z, c.y - 31 * z + bob, 5 * z);
+    }
+
+    this.updateParticles(dt, powered);
+    this.humTimer += dt;
+    if (this.humTimer > 1) {
+      this.humTimer = 0;
+      sfx.setHum(game.hashTotal / 1500);
+    }
+  }
+
+  private updateParticles(dt: number, powered: boolean) {
+    const room = roomDef(game.s.active);
+    const st = game.roomStats[room.id];
+    const ratio = st ? st.heat / room.maxHeat : 0;
+    if (powered && this.fans.length) {
+      this.spawnAcc += dt * (ratio > 0.6 ? 3 + 14 * (ratio - 0.6) : 0);
+      this.sparkAcc += dt * Math.min(8, 1 + this.fans.length * 1.2);
+      while (this.spawnAcc >= 1) {
+        this.spawnAcc -= 1;
+        const f = this.fans[Math.floor(Math.random() * this.fans.length)];
+        const max = 1.2 + Math.random() * 0.8;
+        this.parts.push({ x: f.x + (Math.random() - 0.5) * 20 * zoom, y: f.y - 4 * zoom, vx: (Math.random() - 0.5) * 8, vy: -22 - Math.random() * 18, life: max, max, c: ratio > 1 ? 0xff9a6b : 0xc9d1e6, r: (3 + Math.random() * 3) * zoom });
+      }
+      while (this.sparkAcc >= 1) {
+        this.sparkAcc -= 1;
+        const f = this.fans[Math.floor(Math.random() * this.fans.length)];
+        this.parts.push({ x: f.x, y: f.y - 6 * zoom, vx: (Math.random() - 0.5) * 14, vy: -40 - Math.random() * 25, life: 1.1, max: 1.1, c: 0x4fd1c5, r: 1.8 * zoom });
+      }
+    }
+    if (this.parts.length > 160) this.parts.splice(0, this.parts.length - 160);
+    const g = this.dyn;
+    for (let i = this.parts.length - 1; i >= 0; i--) {
+      const p = this.parts[i];
+      p.life -= dt;
+      if (p.life <= 0) { this.parts.splice(i, 1); continue; }
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      const k = p.life / p.max;
+      if (p.ring) {
+        g.lineStyle(2, p.c, k * 0.8);
+        g.strokeCircle(p.x, p.y, p.r * (2 - k) * 2.2);
+      } else {
+        g.fillStyle(p.c, k * (p.c === 0x4fd1c5 ? 0.9 : 0.35));
+        g.fillCircle(p.x, p.y, p.r * (p.c === 0x4fd1c5 ? 1 : 1.6 - k * 0.6));
+      }
+    }
+  }
+
+  private burst(x: number, y: number, c: number, n: number) {
+    this.parts.push({ x, y, vx: 0, vy: 0, life: 0.45, max: 0.45, c, r: 8 * zoom, ring: true });
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const s = 40 + Math.random() * 90;
+      this.parts.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s - 30, life: 0.7, max: 0.7, c, r: 2 * zoom });
     }
   }
 
   private refresh() {
     this.layout();
-    this.drawBg();
     this.drawRoom(roomDef(game.s.active));
+    if (this.lastRoom !== game.s.active) {
+      this.lastRoom = game.s.active;
+      this.room.setAlpha(0);
+      this.tweens.add({ targets: this.room, alpha: 1, duration: 300 });
+    }
   }
 
   private layout() {
     const w = this.scale.width;
     const h = this.scale.height;
-    const wide = w >= 700;
+    const wide = w >= 900;
     const room = roomDef(game.s.active);
     const W = room.size;
-    const left = 0;
-    const right = wide ? w - 340 : w;
-    const top = 72;
-    const bottom = wide ? h - 90 : h * 0.55;
-    zoom = Math.min(((right - left) * 0.9) / (W * TW), ((bottom - top) * 0.85) / (WALL + W * TH), 2.2);
+    const left = wide ? 280 : 0;
+    const right = wide ? w - 356 : w;
+    const top = wide ? 84 : 96;
+    const bottom = wide ? h - 150 : h * 0.66 - 170;
+    zoom = Math.max(0.35, Math.min(((right - left) * 0.9) / (W * TW), ((bottom - top) * 0.88) / (WALL + W * TH), 2.2));
     ox = (left + right) / 2;
     oy = (top + bottom) / 2 - ((W * TH - WALL) * zoom) / 2;
-  }
-
-  private drawBg() {
-    const w = this.scale.width;
-    const h = this.scale.height;
-    const g = this.bg;
-    g.clear();
-    g.lineStyle(1, 0x4fd1c5, 0.05);
-    for (let x = 0; x < w; x += 48) line(g, { x, y: 0 }, { x, y: h });
-    for (let y = 0; y < h; y += 48) line(g, { x: 0, y }, { x: w, y });
   }
 
   private drawRoom(room: RoomDef) {
     const g = this.room;
     g.clear();
     this.ledPts = [];
+    this.fans = [];
     this.hits = [];
+    this.charPos = null;
     const W = room.size;
     const hot = (game.roomStats[room.id]?.throttle ?? 1) < 1;
+
+    // Schatten
+    for (let i = 4; i >= 1; i--) {
+      g.fillStyle(0x000000, 0.1);
+      g.fillPoints([P(-0.2 * i, W + 0.2 * i, -10), P(W + 0.2 * i, W + 0.2 * i, -10), P(W + 0.2 * i, -0.2 * i, -10), P(W + 0.9 + 0.2 * i, W + 0.9, -34), P(-0.9, W + 0.9 + 0.2 * i, -34)], true);
+    }
+
+    // Bodenplatte (Dicke) wie in der Referenz
+    g.fillStyle(0x6b707c, 1);
+    g.fillPoints([P(0, W, 0), P(W, W, 0), P(W, W, -12), P(0, W, -12)], true);
+    g.fillStyle(0x8a8f9c, 1);
+    g.fillPoints([P(W, 0, 0), P(W, W, 0), P(W, W, -12), P(W, 0, -12)], true);
 
     // Boden mit Dielen
     g.fillStyle(0xa87a2c, 1);
     g.fillPoints([P(0, 0), P(W, 0), P(W, W), P(0, W)], true);
+    for (let i = 0; i < W; i++) {
+      g.fillStyle(i % 2 ? 0xb98932 : 0x9c7027, 0.55);
+      g.fillPoints([P(i, 0), P(i + 1, 0), P(i + 1, W), P(i, W)], true);
+    }
     g.lineStyle(1, 0x000000, 0.16);
     for (let i = 1; i < W; i++) line(g, P(i, 0), P(i, W));
 
-    // Wände (hinten links und rechts)
+    // Lichtkegel vom Fenster
+    const wa = W * 0.2;
+    const wb = wa + 1.6;
+    g.fillStyle(0xfff3c4, 0.1);
+    g.fillPoints([P(wa, 0), P(wb, 0), P(wb + 2.2, 3.4), P(wa + 2.2, 3.4)], true);
+
+    // Wände
     g.fillStyle(0xbfc4cd, 1);
     g.fillPoints([P(0, 0), P(0, W), P(0, W, WALL), P(0, 0, WALL)], true);
     g.fillStyle(0xd6d9df, 1);
     g.fillPoints([P(0, 0), P(W, 0), P(W, 0, WALL), P(0, 0, WALL)], true);
+    g.fillStyle(0x9ea4b2, 1);
+    g.fillPoints([P(0, 0), P(0, W), P(0, W, 7), P(0, 0, 7)], true);
+    g.fillStyle(0xb4b9c4, 1);
+    g.fillPoints([P(0, 0), P(W, 0), P(W, 0, 7), P(0, 0, 7)], true);
 
-    // Fenster auf der rechten Wand
-    const wa = W * 0.2;
-    const wb = wa + 1.6;
+    // Fenster
     const fw = [P(wa, 0, 40), P(wb, 0, 40), P(wb, 0, 80), P(wa, 0, 80)];
     g.fillStyle(0x7fb8e6, 1);
     g.fillPoints(fw, true);
+    g.fillStyle(0xcfe8ff, 0.55);
+    g.fillPoints([P(wa + 0.1, 0, 60), P(wa + 0.45, 0, 60), P(wa + 0.45, 0, 78), P(wa + 0.1, 0, 78)], true);
     g.lineStyle(3, 0x8c90c0, 1);
     g.strokePoints(fw, true, true);
     line(g, P((wa + wb) / 2, 0, 40), P((wa + wb) / 2, 0, 80));
+    line(g, P(wa, 0, 60), P(wb, 0, 60));
 
-    // Bild auf der linken Wand
+    // Bild
     const pa = W * 0.45;
     const pb = pa + 1.8;
+    g.fillStyle(0x3a2a22, 1);
+    g.fillPoints([P(0, pa - 0.08, 40), P(0, pb + 0.08, 40), P(0, pb + 0.08, 84), P(0, pa - 0.08, 84)], true);
     g.fillStyle(0xe0553a, 1);
     g.fillPoints([P(0, pa, 42), P(0, pb, 42), P(0, pb, 82), P(0, pa, 82)], true);
-    g.fillStyle(0xffb36b, 0.6);
+    g.fillStyle(0xffb36b, 0.7);
     g.fillPoints([P(0, pa + 0.3, 50), P(0, pb - 0.4, 50), P(0, pb - 0.4, 74), P(0, pa + 0.3, 74)], true);
+    g.fillStyle(0x2b1d2e, 0.8);
+    g.fillPoints([P(0, pa + 0.9, 42), P(0, pb, 42), P(0, pb, 60), P(0, pa + 0.9, 62)], true);
 
-    // Wandkanten und Sockel
+    // Kanten
     g.lineStyle(2, 0xf2f3f5, 1);
     line(g, P(0, 0, WALL), P(W, 0, WALL));
     line(g, P(0, 0, WALL), P(0, W, WALL));
-    g.lineStyle(4, 0xe8e8ea, 1);
+    g.lineStyle(4, 0xf4f4f6, 1);
     line(g, P(0, 0), P(W, 0));
     line(g, P(0, 0), P(0, W));
+    line(g, P(0, W), P(W, W));
+    line(g, P(W, W), P(W, 0));
 
     // Objekte, nach Tiefe sortiert
+    const led: LedFn = (x, y, c, phase) => this.ledPts.push({ x, y, c, phase });
     const items: { d: number; draw: () => void }[] = [];
     for (const d of DECOR[room.id] ?? []) {
-      items.push({ d: d.u + d.v + (d.du + d.dv) / 2, draw: () => drawDeco(g, d) });
+      items.push({ d: d.u + d.v + (d.du + d.dv) / 2, draw: () => drawDeco(g, d, led) });
+      if (room.id === 'kid' && d.kind === 'chair') {
+        const p = P(d.u + d.du / 2, d.v + d.dv / 2 + 0.1, 11);
+        this.charPos = { x: p.x, y: p.y };
+      }
     }
     const slots = game.s.rooms[room.id] ?? [];
     room.spots.forEach(([u, v], idx) => {
@@ -231,37 +435,54 @@ export class MainScene extends Phaser.Scene {
 
   private drawSlot(g: G, u: number, v: number, idx: number, id: string | null, hot: boolean) {
     box(g, u, v, 1.2, 1.2, 3, 0x262b38);
+    const poly = [P(u, v, 3), P(u + 1.2, v, 3), P(u + 1.2, v + 1.2, 3), P(u, v + 1.2, 3)];
     if (id) {
       const gd = gadgetDef(id);
-      box(g, u + 0.15, v + 0.15, 0.9, 0.9, gd.size, gd.color, 3);
-      const f = P(u + 0.6, v + 0.6, 3 + gd.size + 1);
-      g.fillStyle(shade(gd.color, 0.45), 1);
-      g.fillEllipse(f.x, f.y, 16 * zoom, 8 * zoom);
-      const led = P(u + 1.05, v + 0.6, 3 + gd.size * 0.6);
-      this.ledPts.push({ x: led.x, y: led.y, c: hot ? 0xff6a3d : gd.ledColor, phase: idx * 1.3 });
-    } else {
-      g.lineStyle(1.5, 0x4fd1c5, 0.5);
-      g.strokePoints([P(u, v, 3), P(u + 1.2, v, 3), P(u + 1.2, v + 1.2, 3), P(u, v + 1.2, 3)], true, true);
+      box(g, u + 0.15, v + 0.15, 0.9, 0.9, gd.size, gd.color, 3, 3);
+      const f = P(u + 0.6, v + 0.6, 3 + gd.size);
+      g.fillStyle(0x10131c, 1);
+      g.fillEllipse(f.x, f.y, 40 * zoom, 20 * zoom);
+      g.lineStyle(1.5, shade(gd.color, 1.3), 0.8);
+      g.strokeEllipse(f.x, f.y, 40 * zoom, 20 * zoom);
+      this.fans.push({ x: f.x, y: f.y, hot });
+      for (let k = 0; k < 2; k++) {
+        const led = P(u + 1.05, v + 0.3 + k * 0.45, 3 + gd.size * 0.55);
+        this.ledPts.push({ x: led.x, y: led.y, c: hot ? 0xff6a3d : gd.ledColor, phase: idx * 1.3 + k });
+      }
     }
     const c = P(u + 0.6, v + 0.6);
-    this.hits.push({ x: c.x, y: c.y - 20 * zoom, idx });
+    this.hits.push({ x: c.x, y: c.y - 14 * zoom, idx, poly });
+  }
+
+  private findHit(p: Phaser.Input.Pointer): Hit | undefined {
+    if (!game.s.rooms[game.s.active]) return undefined;
+    return this.hits.find((h) => Math.abs(p.x - h.x) < 34 * zoom && Math.abs(p.y - h.y) < 36 * zoom);
   }
 
   private onPress(p: Phaser.Input.Pointer) {
-    if (!game.s.rooms[game.s.active]) return;
-    const hit = this.hits.find((h) => Math.abs(p.x - h.x) < 36 * zoom && Math.abs(p.y - h.y) < 40 * zoom);
+    sfx.unlock();
+    const hit = this.findHit(p);
     if (hit) {
+      const slots = game.s.rooms[game.s.active];
+      const before = slots[hit.idx];
       game.toggleSlot(hit.idx);
+      if (slots[hit.idx] !== before) {
+        sfx.place();
+        this.burst(hit.x, hit.y, before ? 0xffc857 : 0x4fd1c5, 14);
+      }
       return;
     }
     const gain = game.click();
-    this.floatText(p.x, p.y, `+${gain.toFixed(4)} BIT`);
+    sfx.click();
+    this.burst(p.x, p.y, 0x4fd1c5, 8);
+    this.floatText(p.x, p.y, `+${gain.toFixed(3)} BIT`);
   }
 
   private floatText(x: number, y: number, msg: string) {
     const t = this.add
-      .text(x, y, msg, { fontFamily: 'monospace', fontSize: '14px', color: '#4fd1c5' })
-      .setOrigin(0.5);
-    this.tweens.add({ targets: t, y: y - 50, alpha: 0, duration: 900, onComplete: () => t.destroy() });
+      .text(x, y - 8, msg, { fontFamily: 'Inter, system-ui, sans-serif', fontSize: '15px', fontStyle: 'bold', color: '#7af5e8', stroke: '#06201d', strokeThickness: 4 })
+      .setOrigin(0.5)
+      .setDepth(10);
+    this.tweens.add({ targets: t, y: y - 60, alpha: 0, scale: 1.2, duration: 800, ease: 'Cubic.easeOut', onComplete: () => t.destroy() });
   }
 }

@@ -1,9 +1,10 @@
 import { GADGETS, ROOMS, gadgetDef, roomDef, upgradeDef, upgradeCost } from './config';
 
 export const BASE_PRICE = 40;      // EUR je BIT (Startwert, Mean Reversion)
-export const BIT_PER_HASH = 0.000024;
+export const BIT_PER_HASH = 0.00072;
+export const POWER_SCALE = 5000;  // 1 s Spielzeit = 5000 s Stromverbrauch (macht Strom relevant)
 export const BASE_TARIFF = 0.32;   // EUR/kWh
-export const CLICK_BIT = 0.002;
+export const CLICK_BIT = 0.01;
 const OFFLINE_CAP = 8 * 3600;
 const ACH_REWARD = 250;
 const SAVE_KEY = 'cryptoforge.save.v1';
@@ -32,15 +33,15 @@ export interface RoomStat { heat: number; throttle: number; power: number; hash:
 type Regime = 'bull' | 'bear' | 'side';
 type EventName = 'change' | 'toast';
 
-export interface Mission { title: string; desc: string; reward: number; done: (g: Game) => boolean; }
+export interface Mission { title: string; desc: string; reward: number; done: (g: Game) => boolean; prog: (g: Game) => [number, number]; }
 export interface Achievement { id: string; name: string; desc: string; test: (g: Game) => boolean; }
 
 export const MISSIONS: Mission[] = [
-  { title: 'Erster Rig', desc: 'Kaufe ein Gadget.', reward: 200, done: (g) => g.s.bought >= 1 },
-  { title: 'Erster Verkauf', desc: 'Verkaufe 10 BIT.', reward: 300, done: (g) => g.s.sold >= 10 },
-  { title: 'Kinderzimmer voll', desc: 'Belege alle Slots im Kinderzimmer.', reward: 500, done: (g) => g.roomFull('kid') },
-  { title: 'Kühlung I', desc: 'Kaufe Kühlsystem Stufe 1.', reward: 400, done: (g) => (g.s.upgrades.cool ?? 0) >= 1 },
-  { title: 'Lagerraum beziehen', desc: 'Schalte den Lagerraum frei.', reward: 1000, done: (g) => !!g.s.rooms.store },
+  { title: 'Erster Rig', desc: 'Kaufe ein Gadget.', reward: 200, done: (g) => g.s.bought >= 1, prog: (g) => [Math.min(g.s.bought, 1), 1] },
+  { title: 'Erster Verkauf', desc: 'Verkaufe 10 BIT.', reward: 300, done: (g) => g.s.sold >= 10, prog: (g) => [Math.min(g.s.sold, 10), 10] },
+  { title: 'Kinderzimmer voll', desc: 'Belege alle Slots im Kinderzimmer.', reward: 500, done: (g) => g.roomFull('kid'), prog: (g) => [(g.s.rooms.kid ?? []).filter(Boolean).length, 2] },
+  { title: 'Kühlung I', desc: 'Kaufe Kühlsystem Stufe 1.', reward: 400, done: (g) => (g.s.upgrades.cool ?? 0) >= 1, prog: (g) => [Math.min(g.s.upgrades.cool ?? 0, 1), 1] },
+  { title: 'Lagerraum beziehen', desc: 'Schalte den Lagerraum frei.', reward: 1000, done: (g) => !!g.s.rooms.store, prog: (g) => [g.s.rooms.store ? 1 : 0, 1] },
 ];
 
 export const ACHIEVEMENTS: Achievement[] = [
@@ -116,6 +117,14 @@ export class Game {
     return n;
   }
 
+  /** Netto-Ertrag (EUR/s) eines Gadgets bei aktuellem Kurs und Upgrades. */
+  netPerSec(hash: number, watts: number): number {
+    const up = this.s.upgrades;
+    const oc = 1 + 0.1 * (up.oc ?? 0);
+    const tariff = BASE_TARIFF * Math.pow(0.9, up.tariff ?? 0);
+    return ((hash * oc * BIT_PER_HASH) / this.difficulty()) * this.price - (watts / 1000 / 3600) * tariff * POWER_SCALE;
+  }
+
   /** Hitze, Drosselung, Hashrate, Strom und BIT/s aus dem aktuellen Stand berechnen. */
   recalc() {
     const up = this.s.upgrades;
@@ -144,7 +153,7 @@ export class Game {
     this.s.overheated = overheated;
     this.hashTotal = hash;
     this.bitPerSec = (hash * BIT_PER_HASH) / this.difficulty();
-    this.powerEurPerSec = (watts / 1000 / 3600) * tariff;
+    this.powerEurPerSec = (watts / 1000 / 3600) * tariff * POWER_SCALE;
   }
 
   /** Haupt-Schleife, dt in Sekunden. */
