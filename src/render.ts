@@ -3,6 +3,8 @@ import { game } from './game';
 import { gadgetDef, roomDef } from './config';
 import type { RoomDef } from './config';
 import { sfx } from './audio';
+import { DPR } from './env';
+import { settings } from './settings';
 
 const TW = 64;
 const TH = 32;
@@ -40,15 +42,15 @@ function box(g: G, u: number, v: number, du: number, dv: number, h: number, c: n
   g.fillPoints(right, true);
   g.fillStyle(shade(c, 1.18), 1);
   g.fillPoints(top, true);
-  g.lineStyle(1, 0x000000, 0.35);
+  g.lineStyle(1 * DPR, 0x000000, 0.35);
   g.strokePoints(top, true);
   g.strokePoints(left, true);
   g.strokePoints(right, true);
-  g.lineStyle(1, 0xffffff, 0.22);
+  g.lineStyle(1 * DPR, 0xffffff, 0.22);
   line(g, top[3], top[2]);
   line(g, top[2], top[1]);
   if (vents > 0) {
-    g.lineStyle(1, 0x000000, 0.4);
+    g.lineStyle(1 * DPR, 0x000000, 0.4);
     for (let k = 1; k <= vents; k++) {
       const z = z0 + (h * k) / (vents + 1);
       line(g, P(u, v + dv, z), P(u + du, v + dv, z));
@@ -57,7 +59,7 @@ function box(g: G, u: number, v: number, du: number, dv: number, h: number, c: n
   }
 }
 
-type Kind = 'bed' | 'desk' | 'rack' | 'plant' | 'crate' | 'bench' | 'chair';
+type Kind = 'bed' | 'desk' | 'rack' | 'plant' | 'crate' | 'bench' | 'chair' | 'tank';
 interface Deco { kind: Kind; u: number; v: number; du: number; dv: number; }
 
 const DECOR: Record<string, Deco[]> = {
@@ -73,6 +75,35 @@ const DECOR: Record<string, Deco[]> = {
     { kind: 'crate', u: 2.2, v: 0.4, du: 1.2, dv: 1.2 },
     { kind: 'rack', u: 6.0, v: 0.3, du: 1.0, dv: 1.0 },
     { kind: 'plant', u: 0.4, v: 6.6, du: 0.7, dv: 0.7 },
+  ],
+  basement: [
+    { kind: 'rack', u: 0.4, v: 0.3, du: 1.0, dv: 1.0 },
+    { kind: 'rack', u: 1.6, v: 0.3, du: 1.0, dv: 1.0 },
+    { kind: 'rack', u: 2.8, v: 0.3, du: 1.0, dv: 1.0 },
+    { kind: 'crate', u: 8.2, v: 0.4, du: 1.4, dv: 1.4 },
+    { kind: 'tank', u: 0.5, v: 8.4, du: 1.0, dv: 1.0 },
+    { kind: 'plant', u: 8.8, v: 8.8, du: 0.7, dv: 0.7 },
+  ],
+  hall: [
+    { kind: 'rack', u: 0.4, v: 0.3, du: 1.0, dv: 1.0 },
+    { kind: 'rack', u: 1.6, v: 0.3, du: 1.0, dv: 1.0 },
+    { kind: 'rack', u: 2.8, v: 0.3, du: 1.0, dv: 1.0 },
+    { kind: 'rack', u: 4.0, v: 0.3, du: 1.0, dv: 1.0 },
+    { kind: 'tank', u: 10.4, v: 0.4, du: 1.0, dv: 1.0 },
+    { kind: 'bench', u: 0.3, v: 10.2, du: 3.0, dv: 1.0 },
+    { kind: 'crate', u: 10.0, v: 10.0, du: 1.4, dv: 1.4 },
+  ],
+  dc: [
+    { kind: 'rack', u: 0.4, v: 0.3, du: 1.0, dv: 1.0 },
+    { kind: 'rack', u: 1.6, v: 0.3, du: 1.0, dv: 1.0 },
+    { kind: 'rack', u: 2.8, v: 0.3, du: 1.0, dv: 1.0 },
+    { kind: 'rack', u: 4.0, v: 0.3, du: 1.0, dv: 1.0 },
+    { kind: 'rack', u: 5.2, v: 0.3, du: 1.0, dv: 1.0 },
+    { kind: 'rack', u: 6.4, v: 0.3, du: 1.0, dv: 1.0 },
+    { kind: 'tank', u: 12.2, v: 0.4, du: 1.0, dv: 1.0 },
+    { kind: 'tank', u: 12.2, v: 2.0, du: 1.0, dv: 1.0 },
+    { kind: 'crate', u: 0.4, v: 12.2, du: 1.4, dv: 1.4 },
+    { kind: 'plant', u: 12.8, v: 12.8, du: 0.7, dv: 0.7 },
   ],
   garage: [
     { kind: 'bench', u: 0.3, v: 0.3, du: 3.0, dv: 1.0 },
@@ -111,6 +142,13 @@ function drawDeco(g: G, d: Deco, led: LedFn) {
     case 'crate':
       box(g, u, v, du, dv, 22, 0xb8862b, 0, 2);
       break;
+    case 'tank': {
+      box(g, u, v, du, dv, 40, 0x4a6fa5, 0, 2);
+      box(g, u + 0.15, v + 0.15, du - 0.3, dv - 0.3, 6, 0x7fb0e0, 40);
+      const p = P(u + du, v + dv * 0.5, 22);
+      led(p.x, p.y, 0x7af5ff, u);
+      break;
+    }
     case 'bench':
       box(g, u, v, du, dv, 20, 0x6b5a4a, 0, 1);
       box(g, u + 0.3, v + 0.2, 0.5, 0.5, 8, 0x9aa0b4, 20);
@@ -150,6 +188,8 @@ export class MainScene extends Phaser.Scene {
   private humTimer = 0;
   private lastRoom = '';
   private charPos: Pt | null = null;
+  private dark = 0;
+  private smokeAcc = 0;
 
   constructor() {
     super('main');
@@ -169,6 +209,7 @@ export class MainScene extends Phaser.Scene {
     });
     this.scale.on('resize', () => this.refresh());
     game.on('change', () => this.refresh());
+    game.on('fx', (n) => this.onFx(n ?? ''));
     this.refresh();
   }
 
@@ -176,25 +217,25 @@ export class MainScene extends Phaser.Scene {
     const dt = delta / 1000;
     game.update(dt);
     this.t += dt;
-    const powered = game.s.cash > 0;
+    const powered = game.running();
     const w = this.scale.width;
     const h = this.scale.height;
     const g = this.dyn;
     g.clear();
 
     // Schwebende Partikel im Hintergrund
-    for (const d of this.dust) {
+    for (const d of settings.quality === 'low' ? [] : this.dust) {
       d.y -= d.sp * dt;
       if (d.y < -0.02) { d.y = 1.02; d.x = Math.random(); }
       g.fillStyle(0x4fd1c5, 0.12 + 0.12 * Math.sin(this.t * 1.4 + d.ph));
-      g.fillCircle(d.x * w + Math.sin(this.t * 0.5 + d.ph) * 10, d.y * h, d.s);
+      g.fillCircle(d.x * w + Math.sin(this.t * 0.5 + d.ph) * 10 * DPR, d.y * h, d.s * DPR);
     }
 
     // Leere Slots: pulsierende Umrandung, Hover-Highlight
     for (const hit of this.hits) {
       const slot = game.s.rooms[game.s.active]?.[hit.idx];
       if (!slot) {
-        g.lineStyle(2, 0x4fd1c5, 0.35 + 0.35 * Math.sin(this.t * 3 + hit.idx));
+        g.lineStyle(2 * DPR, 0x4fd1c5, 0.35 + 0.35 * Math.sin(this.t * 3 + hit.idx));
         g.strokePoints(hit.poly, true, true);
         g.fillStyle(0x4fd1c5, 0.06 + 0.05 * Math.sin(this.t * 3 + hit.idx));
         g.fillPoints(hit.poly, true);
@@ -204,7 +245,7 @@ export class MainScene extends Phaser.Scene {
         g.lineBetween(c.x, c.y - 4 * zoom, c.x, c.y + 4 * zoom);
       }
       if (hit.idx === this.hover) {
-        g.lineStyle(2.5, 0xffffff, 0.8);
+        g.lineStyle(2.5 * DPR, 0xffffff, 0.8);
         g.strokePoints(hit.poly, true, true);
       }
     }
@@ -256,6 +297,13 @@ export class MainScene extends Phaser.Scene {
     }
 
     this.updateParticles(dt, powered);
+    this.dark += ((game.s.ev?.id === 'outage' ? 1 : 0) - this.dark) * Math.min(1, dt * 3);
+    if (this.dark > 0.01) {
+      g.fillStyle(0x02030a, 0.62 * this.dark);
+      g.fillRect(0, 0, w, h);
+      g.lineStyle(6 * DPR, 0xff3b30, this.dark * (0.25 + 0.25 * Math.sin(this.t * 6)));
+      g.strokeRect(3 * DPR, 3 * DPR, w - 6 * DPR, h - 6 * DPR);
+    }
     this.humTimer += dt;
     if (this.humTimer > 1) {
       this.humTimer = 0;
@@ -282,21 +330,32 @@ export class MainScene extends Phaser.Scene {
         this.parts.push({ x: f.x, y: f.y - 6 * zoom, vx: (Math.random() - 0.5) * 14, vy: -40 - Math.random() * 25, life: 1.1, max: 1.1, c: 0x4fd1c5, r: 1.8 * zoom });
       }
     }
-    if (this.parts.length > 160) this.parts.splice(0, this.parts.length - 160);
+    const cond = st ? st.cond : 100;
+    if (powered && cond < 45 && this.fans.length) {
+      this.smokeAcc += dt * (45 - cond) * 0.12;
+      while (this.smokeAcc >= 1) {
+        this.smokeAcc -= 1;
+        const f = this.fans[Math.floor(Math.random() * this.fans.length)];
+        this.parts.push({ x: f.x, y: f.y - 4 * zoom, vx: (Math.random() - 0.5) * 16, vy: -26, life: 1.4, max: 1.4, c: 0x555a66, r: 5 * zoom });
+        if (Math.random() < 0.5) this.parts.push({ x: f.x, y: f.y - 6 * zoom, vx: (Math.random() - 0.5) * 60, vy: -50 - Math.random() * 30, life: 0.5, max: 0.5, c: 0xffe066, r: 1.6 * zoom });
+      }
+    }
+    const cap = settings.quality === 'low' ? 60 : 180;
+    if (this.parts.length > cap) this.parts.splice(0, this.parts.length - cap);
     const g = this.dyn;
     for (let i = this.parts.length - 1; i >= 0; i--) {
       const p = this.parts[i];
       p.life -= dt;
       if (p.life <= 0) { this.parts.splice(i, 1); continue; }
-      p.x += p.vx * dt;
-      p.y += p.vy * dt;
+      p.x += p.vx * dt * DPR;
+      p.y += p.vy * dt * DPR;
       const k = p.life / p.max;
       if (p.ring) {
-        g.lineStyle(2, p.c, k * 0.8);
+        g.lineStyle(2 * DPR, p.c, k * 0.8);
         g.strokeCircle(p.x, p.y, p.r * (2 - k) * 2.2);
       } else {
-        g.fillStyle(p.c, k * (p.c === 0x4fd1c5 ? 0.9 : 0.35));
-        g.fillCircle(p.x, p.y, p.r * (p.c === 0x4fd1c5 ? 1 : 1.6 - k * 0.6));
+        g.fillStyle(p.c, k * (p.c === 0x4fd1c5 || p.c === 0xffe066 ? 0.9 : 0.35));
+        g.fillCircle(p.x, p.y, p.r * (p.c === 0x4fd1c5 || p.c === 0xffe066 ? 1 : 1.6 - k * 0.6));
       }
     }
   }
@@ -321,8 +380,8 @@ export class MainScene extends Phaser.Scene {
   }
 
   private layout() {
-    const w = this.scale.width;
-    const h = this.scale.height;
+    const w = this.scale.width / DPR;
+    const h = this.scale.height / DPR;
     const wide = w >= 900;
     const room = roomDef(game.s.active);
     const W = room.size;
@@ -330,9 +389,10 @@ export class MainScene extends Phaser.Scene {
     const right = wide ? w - 356 : w;
     const top = wide ? 84 : 96;
     const bottom = wide ? h - 150 : h * 0.66 - 170;
-    zoom = Math.max(0.35, Math.min(((right - left) * 0.9) / (W * TW), ((bottom - top) * 0.88) / (WALL + W * TH), 2.2));
-    ox = (left + right) / 2;
-    oy = (top + bottom) / 2 - ((W * TH - WALL) * zoom) / 2;
+    const z = Math.max(0.3, Math.min(((right - left) * 0.9) / (W * TW), ((bottom - top) * 0.88) / (WALL + W * TH), 2.2));
+    zoom = z * DPR;
+    ox = ((left + right) / 2) * DPR;
+    oy = ((top + bottom) / 2 - ((W * TH - WALL) * z) / 2) * DPR;
   }
 
   private drawRoom(room: RoomDef) {
@@ -364,7 +424,7 @@ export class MainScene extends Phaser.Scene {
       g.fillStyle(i % 2 ? 0xb98932 : 0x9c7027, 0.55);
       g.fillPoints([P(i, 0), P(i + 1, 0), P(i + 1, W), P(i, W)], true);
     }
-    g.lineStyle(1, 0x000000, 0.16);
+    g.lineStyle(1 * DPR, 0x000000, 0.16);
     for (let i = 1; i < W; i++) line(g, P(i, 0), P(i, W));
 
     // Lichtkegel vom Fenster
@@ -389,7 +449,7 @@ export class MainScene extends Phaser.Scene {
     g.fillPoints(fw, true);
     g.fillStyle(0xcfe8ff, 0.55);
     g.fillPoints([P(wa + 0.1, 0, 60), P(wa + 0.45, 0, 60), P(wa + 0.45, 0, 78), P(wa + 0.1, 0, 78)], true);
-    g.lineStyle(3, 0x8c90c0, 1);
+    g.lineStyle(3 * DPR, 0x8c90c0, 1);
     g.strokePoints(fw, true, true);
     line(g, P((wa + wb) / 2, 0, 40), P((wa + wb) / 2, 0, 80));
     line(g, P(wa, 0, 60), P(wb, 0, 60));
@@ -407,10 +467,10 @@ export class MainScene extends Phaser.Scene {
     g.fillPoints([P(0, pa + 0.9, 42), P(0, pb, 42), P(0, pb, 60), P(0, pa + 0.9, 62)], true);
 
     // Kanten
-    g.lineStyle(2, 0xf2f3f5, 1);
+    g.lineStyle(2 * DPR, 0xf2f3f5, 1);
     line(g, P(0, 0, WALL), P(W, 0, WALL));
     line(g, P(0, 0, WALL), P(0, W, WALL));
-    g.lineStyle(4, 0xf4f4f6, 1);
+    g.lineStyle(4 * DPR, 0xf4f4f6, 1);
     line(g, P(0, 0), P(W, 0));
     line(g, P(0, 0), P(0, W));
     line(g, P(0, W), P(W, W));
@@ -442,7 +502,7 @@ export class MainScene extends Phaser.Scene {
       const f = P(u + 0.6, v + 0.6, 3 + gd.size);
       g.fillStyle(0x10131c, 1);
       g.fillEllipse(f.x, f.y, 40 * zoom, 20 * zoom);
-      g.lineStyle(1.5, shade(gd.color, 1.3), 0.8);
+      g.lineStyle(1.5 * DPR, shade(gd.color, 1.3), 0.8);
       g.strokeEllipse(f.x, f.y, 40 * zoom, 20 * zoom);
       this.fans.push({ x: f.x, y: f.y, hot });
       for (let k = 0; k < 2; k++) {
@@ -478,11 +538,38 @@ export class MainScene extends Phaser.Scene {
     this.floatText(p.x, p.y, `+${gain.toFixed(3)} BIT`);
   }
 
-  private floatText(x: number, y: number, msg: string) {
+  private center(): Pt {
+    const W = roomDef(game.s.active).size;
+    return P(W / 2, W / 2, 24);
+  }
+
+  private shake(ms: number, k: number) {
+    if (settings.shake) this.cameras.main.shake(ms, k);
+  }
+
+  private onFx(name: string) {
+    sfx.fx(name);
+    const c = this.center();
+    switch (name) {
+      case 'hack': this.cameras.main.flash(250, 255, 40, 40); this.shake(400, 0.01); break;
+      case 'crash': this.cameras.main.flash(200, 255, 80, 60); this.shake(500, 0.008); break;
+      case 'boom': this.cameras.main.flash(200, 255, 220, 100); this.burst(c.x, c.y, 0xffc857, 30); break;
+      case 'outage': this.shake(300, 0.005); break;
+      case 'end-outage': this.cameras.main.flash(250, 120, 255, 240); break;
+      case 'fail': this.shake(250, 0.007); this.burst(c.x, c.y, 0xffe066, 14); break;
+      case 'block': this.burst(c.x, c.y, 0xffc857, 24); this.floatText(c.x, c.y - 30 * DPR, 'BLOCK GEFUNDEN!', '#ffd479'); break;
+      case 'research': this.burst(c.x, c.y, 0x8c7bff, 24); break;
+      case 'repair': this.burst(c.x, c.y, 0x7ee787, 16); break;
+      case 'prestige': this.cameras.main.flash(600, 255, 255, 255); this.burst(c.x, c.y, 0xffffff, 40); break;
+      case 'win': this.burst(c.x, c.y, 0xffc857, 18); break;
+    }
+  }
+
+  private floatText(x: number, y: number, msg: string, color = '#7af5e8') {
     const t = this.add
-      .text(x, y - 8, msg, { fontFamily: 'Inter, system-ui, sans-serif', fontSize: '15px', fontStyle: 'bold', color: '#7af5e8', stroke: '#06201d', strokeThickness: 4 })
+      .text(x, y - 8 * DPR, msg, { fontFamily: 'Inter, system-ui, sans-serif', fontSize: `${15 * DPR}px`, fontStyle: 'bold', color, stroke: '#06201d', strokeThickness: 4 * DPR })
       .setOrigin(0.5)
       .setDepth(10);
-    this.tweens.add({ targets: t, y: y - 60, alpha: 0, scale: 1.2, duration: 800, ease: 'Cubic.easeOut', onComplete: () => t.destroy() });
+    this.tweens.add({ targets: t, y: y - 60 * DPR, alpha: 0, scale: 1.2, duration: 800, ease: 'Cubic.easeOut', onComplete: () => t.destroy() });
   }
 }
