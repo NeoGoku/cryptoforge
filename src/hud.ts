@@ -4,10 +4,10 @@ import type { GadgetDef } from './config';
 import { sfx } from './audio';
 import { settings, saveSettings } from './settings';
 
-type Tab = 'shop' | 'inv' | 'market' | 'bank' | 'tech' | 'tasks' | 'rooms' | 'more';
+type Tab = 'shop' | 'inv' | 'market' | 'bank' | 'tech' | 'tasks' | 'ach' | 'rooms' | 'more';
 const TABS: [Tab, string, string][] = [
   ['shop', '🛒', 'Shop'], ['inv', '🎒', 'Lager'], ['market', '📊', 'Markt'], ['bank', '🏦', 'Bank'],
-  ['tech', '🔬', 'Tech'], ['tasks', '🎯', 'Aufgaben'], ['rooms', '🏠', 'Räume'], ['more', '⚙️', 'Mehr'],
+  ['tech', '🔬', 'Tech'], ['tasks', '🎯', 'Aufgaben'], ['ach', '🏆', 'Erfolge'], ['rooms', '🏠', 'Räume'], ['more', '⚙️', 'Mehr'],
 ];
 
 const $ = (id: string) => document.getElementById(id) as HTMLElement;
@@ -222,6 +222,7 @@ export class HUD {
     const before = game.s.cash;
     switch (act) {
       case 'buy-gadget': game.buyGadget(id); break;
+      case 'sell-gadget': game.sellGadget(id); break;
       case 'place': game.placeItem(); break;
       case 'buy-upg': game.buyUpgrade(id); break;
       case 'hire': game.hire(id); break;
@@ -285,6 +286,7 @@ export class HUD {
       case 'tech': h = this.tech(); break;
       case 'tasks': h = this.tasks(); break;
       case 'rooms': h = this.rooms(); break;
+      case 'ach': h = this.achievements(); break;
       case 'more': h = this.more(); break;
     }
     el.innerHTML = h;
@@ -297,8 +299,10 @@ export class HUD {
     const maxT = Math.max(...GADGETS.map((g) => g.heat));
     const rar = ['Common', 'Rare', 'Epic', 'Legendary', 'Mythic'];
     const sale = game.s.ev?.id === 'sale';
+    const full = game.totalGadgets() >= game.maxGadgets();
     const coins = COINS.filter((c) => game.coinUnlocked(c));
-    return GADGETS.map((g, i) => {
+    const head = full ? `<div class="lockmsg" style="margin-bottom:8px">Alle ${game.maxGadgets()} Plätze belegt – verkaufe ein Gadget oder erweitere einen Raum.</div>` : '';
+    return head + GADGETS.map((g, i) => {
       const locked = !game.gadgetUnlocked(g);
       const cost = game.gadgetCost(g);
       const lines = coins.map((c) => {
@@ -319,7 +323,7 @@ export class HUD {
         </div>
         ${locked ? `<div class="lockmsg">🔒 Erforsche „${techDef(g.unlock!).name}“ im Tech-Tab.</div>` : ''}
         <div class="row"><span class="roi">${roi}<br><span class="muted">Netto €/s: ${lines}</span></span>
-          <button class="buy" data-act="buy-gadget" data-id="${g.id}" data-cost="${cost}" data-locked="${locked ? 1 : 0}" ${locked ? 'disabled' : ''}>${sale ? `<span class="old">${eur(g.cost)}</span>` : ''}${eur(cost)}</button></div>
+          <div class="btns" style="margin:0;flex-wrap:nowrap"><button data-act="sell-gadget" data-id="${g.id}" ${(game.s.inv[g.id] ?? 0) < 1 ? 'disabled' : ''}>Verk. ${eur(Math.round(g.cost * 0.5))}</button><button class="buy" data-act="buy-gadget" data-id="${g.id}" data-cost="${cost}" data-locked="${locked || full ? 1 : 0}" ${locked || full ? 'disabled' : ''}>${sale ? `<span class="old">${eur(g.cost)}</span>` : ''}${eur(cost)}</button></div></div>
       </div>`;
     }).join('');
   }
@@ -329,7 +333,7 @@ export class HUD {
     const slots = game.s.rooms[room.id] ?? [];
     const free = slots.filter((s) => s === null).length;
     const items = GADGETS.map((g, i) => ({ g, i, n: game.s.inv[g.id] ?? 0 })).filter((x) => x.n > 0);
-    const list = items.map(({ g, i, n }) => `<div class="card" style="--c:${hex(g.ledColor)}"><div class="head">${icon(g, i)}<div style="flex:1"><div class="name">${g.name}</div><div class="muted">${num(g.hash)} H/s · ${num(g.watts)} W</div></div><b style="font-size:18px">× ${n}</b></div></div>`).join('');
+    const list = items.map(({ g, i, n }) => `<div class="card" style="--c:${hex(g.ledColor)}"><div class="head">${icon(g, i)}<div style="flex:1"><div class="name">${g.name}</div><div class="muted">${num(g.hash)} H/s · ${num(g.watts)} W</div></div><b style="font-size:18px">× ${n}</b></div><div class="row" style="justify-content:flex-end;margin-top:8px"><button data-act="sell-gadget" data-id="${g.id}">Verkaufen ${eur(Math.round(g.cost * 0.5))}</button></div></div>`).join('');
     return `<div class="sect">${room.name} · ${slots.length - free}/${slots.length} Slots belegt</div>
       <button class="primary" style="width:100%;margin-bottom:10px" data-act="place" ${free === 0 || items.length === 0 ? 'disabled' : ''}>Bestes Gadget platzieren</button>
       ${list || '<div class="muted" style="padding:14px 4px">Kein Gadget im Lager. Kaufe eins im Shop.</div>'}
@@ -452,7 +456,9 @@ export class HUD {
       <button class="buy" data-act="daily" ${ready ? '' : 'disabled'}>${ready ? `+${num(game.dailyReward())} €` : 'Morgen wieder'}</button></div>
       <div class="muted" style="margin-top:3px">Serie: ${game.s.streak.count} Tag(e). Je länger die Serie (bis 7), desto größer der Bonus.</div></div>`;
     h += title('Missionen');
-    h += MISSIONS.map((m, i) => {
+    const order = Array.from({ length: MISSIONS.length }, (_, k) => k).sort((a, b) => (a < game.s.mission ? 1 : 0) - (b < game.s.mission ? 1 : 0) || a - b);
+    h += order.map((i) => {
+      const m = MISSIONS[i];
       const state = i < game.s.mission ? 'done' : i === game.s.mission ? 'cur' : 'lock';
       const [c, t] = m.prog(game);
       const pct = state === 'done' ? 100 : (c / t) * 100;
@@ -462,12 +468,17 @@ export class HUD {
         <div class="track"><div class="fill" style="width:${pct}%;--b:var(--gold)"></div></div>
       </div>`;
     }).join('');
-    h += title(`Erfolge ${game.s.ach.length}/${ACHIEVEMENTS.length}`);
-    h += ACHIEVEMENTS.map((a) => {
-      const ok = game.s.ach.includes(a.id);
-      return `<div class="card ${ok ? 'done' : 'lock'}"><div class="row"><span class="name">${ok ? '🏆' : '🔒'} ${a.name}</span></div><div class="muted">${a.desc}</div></div>`;
-    }).join('');
     return h;
+  }
+
+  private achievements(): string {
+    const n = game.s.ach.length;
+    const list = [...ACHIEVEMENTS].sort((a, b) => Number(game.s.ach.includes(b.id)) - Number(game.s.ach.includes(a.id)));
+    return `<div class="card" style="--c:var(--gold)"><div class="row"><span class="name">🏆 Fortschritt</span><span class="muted">${n} / ${ACHIEVEMENTS.length}</span></div>
+      <div class="track" style="margin-top:8px"><div class="fill" style="width:${(n / ACHIEVEMENTS.length) * 100}%;--b:var(--gold)"></div></div></div>` + list.map((a) => {
+      const ok = game.s.ach.includes(a.id);
+      return `<div class="card ${ok ? 'done' : 'lock'}"><div class="row"><span class="name">${ok ? '🏆' : '🔒'} ${a.name}</span>${ok ? '<span class="tag" style="--c:var(--acc)">Erreicht</span>' : ''}</div><div class="muted">${a.desc}</div></div>`;
+    }).join('');
   }
 
   private rooms(): string {

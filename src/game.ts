@@ -82,6 +82,17 @@ export const MISSIONS: Mission[] = [
   mk('Vermögend', 'Erreiche 50.000 € Vermögen.', 10000, (g) => g.netWorth() >= 50000, (g) => min1(Math.max(0, g.netWorth()), 50000)),
   mk('Quantensprung', 'Erforsche Quantum-Hardware.', 20000, (g) => g.s.research.includes('quantum'), (g) => [g.s.research.includes('quantum') ? 1 : 0, 1]),
   mk('Neustart', 'Führe einen Prestige-Neustart durch.', 25000, (g) => g.s.prestige.resets >= 1, (g) => [Math.min(g.s.prestige.resets, 1), 1]),
+  mk('Kühlung III', 'Kaufe Kühlsystem Stufe 3.', 2500, (g) => (g.s.upgrades.cool ?? 0) >= 3, (g) => min1(g.s.upgrades.cool ?? 0, 3)),
+  mk('Fünf Rigs', 'Besitze insgesamt 5 Gadgets.', 1500, (g) => g.totalGadgets() >= 5, (g) => min1(g.totalGadgets(), 5)),
+  mk('Stromsparer', 'Erforsche die Effizienz-Firmware.', 2000, (g) => g.has('eff'), (g) => min1(g.has('eff') ? 1 : 0, 1)),
+  mk('Staker', 'Stake Coins.', 2500, (g) => Object.values(g.s.staked).some((v) => v > 0), (g) => min1(Object.values(g.s.staked).some((v) => v > 0) ? 1 : 0, 1)),
+  mk('Blockfinder', 'Finde 5 Blöcke im Solo-Modus.', 3000, (g) => g.s.stats.blocks >= 5, (g) => min1(g.s.stats.blocks, 5)),
+  mk('Zehn Plätze', 'Stelle 10 Gadgets auf.', 4000, (g) => g.placedCount() >= 10, (g) => min1(g.placedCount(), 10)),
+  mk('Garage voll', 'Belege alle Slots der Garage.', 8000, (g) => g.roomFull('garage'), (g) => [(g.s.rooms.garage ?? []).filter(Boolean).length, 6]),
+  mk('Hunderttausend', 'Erreiche 100.000 € Vermögen.', 12000, (g) => g.netWorth() >= 100000, (g) => min1(Math.max(0, g.netWorth()), 100000)),
+  mk('Industriehalle', 'Schalte die Industriehalle frei.', 20000, (g) => !!g.s.rooms.hall, (g) => [g.s.rooms.hall ? 1 : 0, 1]),
+  mk('Quantenzeitalter', 'Besitze einen Quantum Q1.', 30000, (g) => g.owned('qpu') >= 1, (g) => min1(g.owned('qpu'), 1)),
+  mk('Fusionskern', 'Erforsche den Fusionskern.', 50000, (g) => g.has('fusion'), (g) => min1(g.has('fusion') ? 1 : 0, 1)),
 ];
 
 const ach = (id: string, name: string, desc: string, test: (g: Game) => boolean): Achievement => ({ id, name, desc, test });
@@ -229,6 +240,14 @@ export class Game {
     let n = 0;
     for (const id in this.s.rooms) n += this.s.rooms[id].filter(Boolean).length;
     return n;
+  }
+
+  maxGadgets(): number {
+    return ROOMS.reduce((a, r) => a + (this.s.rooms[r.id] ? r.spots.length : 0), 0);
+  }
+
+  totalGadgets(): number {
+    return Object.values(this.s.inv).reduce((a, b) => a + b, 0) + this.placedCount();
   }
 
   owned(id: string): number {
@@ -617,6 +636,10 @@ export class Game {
       this.toast('Noch nicht erforscht.');
       return;
     }
+    if (this.totalGadgets() >= this.maxGadgets()) {
+      this.toast('Keine freien Plätze – erweitere einen Raum oder verkaufe ein Gadget.');
+      return;
+    }
     const cost = this.gadgetCost(g);
     if (this.s.cash < cost) {
       this.toast('Zu wenig Bargeld.');
@@ -625,6 +648,16 @@ export class Game {
     this.s.cash -= cost;
     this.s.bought++;
     this.addInv(id, 1);
+    this.afterChange();
+  }
+
+  sellGadget(id: string) {
+    if ((this.s.inv[id] ?? 0) < 1) {
+      this.toast('Kein Gadget im Lager zum Verkaufen.');
+      return;
+    }
+    this.s.cash += Math.round(gadgetDef(id).cost * 0.5);
+    this.addInv(id, -1);
     this.afterChange();
   }
 
@@ -879,7 +912,7 @@ export class Game {
       prestige: { points: total, resets: this.s.prestige.resets + 1, lifetime: this.s.prestige.lifetime + this.s.soldEur },
       streak: this.s.streak,
       tutorial: true,
-      mission: Math.max(this.s.mission, MISSIONS.length - 1),
+      mission: this.s.mission,
     };
     this.s = { ...this.fresh(), ...keep };
     this.fx('prestige');
