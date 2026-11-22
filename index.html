@@ -107,7 +107,25 @@
 
   /* Dock */
   #dock { position: absolute; left: 10px; right: 356px; bottom: 10px; display: flex; flex-direction: column; gap: 8px; }
-  #rooms { display: flex; gap: 6px; flex-wrap: wrap; }
+  #rooms { display: flex; flex-direction: column; gap: 6px; }
+  .roomrow, .coinrow { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  .roomrow .chip small { opacity: .65; margin-left: 4px; }
+  .roomrow .chip.arrow { padding: 6px 10px; }
+  .roomrow .chip.buy { font-size: 12px; }
+  .coinrow { font-size: 12px; }
+  .coinrow button { padding: 4px 10px; font-size: 11.5px; border-radius: 999px; }
+  .chips button small, .coinrow button small { opacity: .6; font-size: 9.5px; }
+  button.weak { opacity: .4; text-decoration: line-through; }
+  #boosts { display: flex; gap: 6px; flex-wrap: wrap; }
+  .boost { padding: 6px 10px; font-size: 12px; min-width: 150px; border-color: var(--gold); animation: toastin .35s ease; }
+  .boost .track { height: 4px; margin-top: 4px; }
+  .flyer { position: absolute; left: 0; top: 0; width: 64px; height: 64px; border-radius: 50%; border: 0; padding: 0; background: radial-gradient(circle, rgba(255,200,87,.45), rgba(255,200,87,0) 70%); font-size: 34px; cursor: pointer; z-index: 6; filter: drop-shadow(0 0 10px rgba(255,200,87,.9)); animation: flyglow .7s ease-in-out infinite alternate; transition: opacity .35s; }
+  .flyer span { display: block; line-height: 1; }
+  .flyer i { position: absolute; left: 50%; top: 40px; transform: translateX(-50%); font-size: 20px; font-style: normal; }
+  .flyer.gone { opacity: 0; pointer-events: none; }
+  @keyframes flyglow { from { filter: drop-shadow(0 0 6px rgba(255,200,87,.6)); } to { filter: drop-shadow(0 0 18px rgba(255,200,87,1)); } }
+  .floaty { position: absolute; transform: translate(-50%, 0); color: #ffd479; font-weight: 800; font-size: 18px; text-shadow: 0 2px 8px rgba(0,0,0,.8); pointer-events: none !important; z-index: 7; white-space: nowrap; animation: floatup 1.6s ease-out forwards; }
+  @keyframes floatup { from { opacity: 1; transform: translate(-50%, 0) scale(.8); } 20% { transform: translate(-50%, -12px) scale(1.15); } to { opacity: 0; transform: translate(-50%, -70px) scale(1); } }
   .bar { display: flex; align-items: center; gap: 14px; padding: 10px 14px; }
   .meter { flex: 1; min-width: 0; }
   .mhead { display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 5px; gap: 8px; }
@@ -189,6 +207,9 @@
     .sell { width: 100%; }
     .sell button { flex: 1; padding: 8px 6px; font-size: 12px; white-space: nowrap; }
     #toasts { top: 172px; }
+    .roomrow, .coinrow { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+    .roomrow .chip { white-space: nowrap; padding: 5px 10px; font-size: 12px; }
+    .boost { min-width: 0; font-size: 11px; padding: 4px 8px; }
     #evbar { top: 128px; min-width: 200px; font-size: 12px; }
   }
 </style>
@@ -204,7 +225,7 @@
     </div>
     <div class="stats">
       <div class="pill cash"><i>💶</i><div><small>Bargeld</small><b id="cash">–</b></div></div>
-      <div class="pill"><i>🪙</i><div><small>BIT</small><b id="coins">–</b></div></div>
+      <div class="pill"><i>🪙</i><div><small id="coinLbl">ETRA</small><b id="coins">–</b></div></div>
       <div class="pill chart"><i>📈</i><div><small>Kurs <span id="regime"></span></small><b><span id="price">–</span><span id="chg"></span></b></div><canvas id="spark" width="90" height="28"></canvas></div>
       <div class="pill hash"><i>⚡</i><div><small>Hashrate</small><b id="hash">–</b></div></div>
       <div class="pill debt" id="debtPill" style="display:none"><i>🏦</i><div><small>Schulden</small><b id="debt">–</b></div></div>
@@ -221,6 +242,7 @@
   <aside id="panel" class="glass"><nav id="tabs"></nav><div id="content"></div></aside>
 
   <footer id="dock">
+    <div id="boosts"></div>
     <div id="rooms"></div>
     <div class="bar glass">
       <div class="meter">

@@ -174,6 +174,9 @@ export const sfx = {
       case 'prestige': chime(200, 9, 0.11, 'sawtooth'); tone(80, 1.6, 'sine', 0.2, 320); break;
       case 'autosell': tone(1568, 0.1, 'triangle', 0.07); break;
       case 'win': this.win(); break;
+      case 'bonus': chime(880, 5, 0.05, 'triangle'); break;
+      case 'news-up': tone(880, 0.12, 'triangle', 0.08); tone(1175, 0.18, 'triangle', 0.08, undefined, 0.1); break;
+      case 'news-down': tone(520, 0.14, 'triangle', 0.08); tone(390, 0.22, 'triangle', 0.08, undefined, 0.12); break;
     }
   },
   setHum(level: number) {

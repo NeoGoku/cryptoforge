@@ -31,15 +31,24 @@ export interface CoinDef {
   revert: number;    // Rückkehr zum Basiskurs
   perHash: number;   // Coins je Hash und Sekunde
   mult: Record<Kind, number>; // Algorithmus-Faktor je Gadget-Typ
+  minHash: number;   // Mindest-Hashrate je Gadget, um diesen Coin zu minen
   desc: string;
   unlock?: string;
 }
 
 export const COINS: CoinDef[] = [
-  { id: 'BIT', name: 'BitForge', color: '#ffc857', base: 40, vol: 0.04, revert: 0.02, perHash: 0.00072, mult: { gpu: 0.8, asic: 1.1, quantum: 1.1, fusion: 1.1 }, desc: 'Solide Leitwährung. ASIC-freundlich.' },
-  { id: 'ETRA', name: 'Etra', color: '#8c7bff', base: 12, vol: 0.06, revert: 0.02, perHash: 0.0022, mult: { gpu: 1.35, asic: 0.6, quantum: 0.9, fusion: 0.9 }, desc: 'GPU-Algorithmus. Mittlere Schwankung.' },
-  { id: 'NOVA', name: 'Nova', color: '#ff6aa8', base: 0.8, vol: 0.14, revert: 0.008, perHash: 0.03, mult: { gpu: 1, asic: 1, quantum: 1.2, fusion: 1.2 }, desc: 'Spekulativer Meme-Coin. Extreme Ausschläge.', unlock: 'market' },
+  { id: 'ETRA', name: 'Etra', color: '#8c7bff', base: 12, vol: 0.06, revert: 0.02, perHash: 0.0022, minHash: 20, mult: { gpu: 1.35, asic: 0.6, quantum: 0.9, fusion: 0.9 }, desc: 'GPU-Algorithmus. Ideal für den Einstieg.' },
+  { id: 'NOVA', name: 'Nova', color: '#ff6aa8', base: 0.8, vol: 0.14, revert: 0.008, perHash: 0.03, minHash: 0, mult: { gpu: 1, asic: 1, quantum: 1.2, fusion: 1.2 }, desc: 'Spekulativer Meme-Coin. Extreme Ausschläge.', unlock: 'market' },
+  { id: 'BIT', name: 'BitForge', color: '#ffc857', base: 40, vol: 0.04, revert: 0.02, perHash: 0.00072, minHash: 100, mult: { gpu: 0.8, asic: 1.1, quantum: 1.1, fusion: 1.1 }, desc: 'Solide Leitwährung. Braucht ASIC-Leistung.' },
+  { id: 'LUX', name: 'Luxar', color: '#7ee787', base: 320, vol: 0.05, revert: 0.02, perHash: 0.000106, minHash: 500, mult: { gpu: 1, asic: 1.15, quantum: 1, fusion: 1 }, desc: 'Premium-Coin für Hochleistungs-ASICs.' },
+  { id: 'QBT', name: 'Qubit', color: '#7af5ff', base: 2600, vol: 0.07, revert: 0.015, perHash: 0.0000162, minHash: 3000, mult: { gpu: 1, asic: 1, quantum: 1.3, fusion: 1.05 }, desc: 'Quanten-Algorithmus. Nur für Quantenrechner.', unlock: 'quantum' },
+  { id: 'HEL', name: 'Helion', color: '#ff9f43', base: 21000, vol: 0.06, revert: 0.015, perHash: 0.00000238, minHash: 15000, mult: { gpu: 1, asic: 1, quantum: 1, fusion: 1.3 }, desc: 'Fusions-Coin. Höchster Ertrag je Hash.', unlock: 'fusion' },
 ];
+
+export const DEFAULT_COIN = 'ETRA';
+
+/** Kann dieses Gadget den Coin minen (genug Hashrate je Gerät)? */
+export const canMine = (g: GadgetDef, c: CoinDef): boolean => g.hash >= c.minHash && c.mult[g.kind] > 0;
 
 export interface RoomDef {
   id: string;

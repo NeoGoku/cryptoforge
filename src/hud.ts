@@ -1,5 +1,5 @@
-import { game, MISSIONS, ACHIEVEMENTS, INSURE_RATE, LOAN_RATE, POOL_FEE } from './game';
-import { GADGETS, ROOMS, UPGRADES, STAFF, TECHS, COINS, LOANS, upgradeCost, staffCost, coinDef, techDef } from './config';
+import { game, MISSIONS, ACHIEVEMENTS, INSURE_RATE, LOAN_RATE, POOL_FEE, BOOST_INFO } from './game';
+import { GADGETS, ROOMS, UPGRADES, STAFF, TECHS, COINS, LOANS, DEFAULT_COIN, upgradeCost, staffCost, coinDef, techDef } from './config';
 import type { GadgetDef } from './config';
 import { sfx } from './audio';
 import { settings, saveSettings } from './settings';
@@ -125,7 +125,7 @@ export class HUD {
   }
 
   toast(msg: string) {
-    const gold = /^(Mission|Erfolg|Tagesbonus|Forschung abgeschlossen)/.test(msg);
+    const gold = /^(Mission|Erfolg|Tagesbonus|Forschung abgeschlossen|Bonus)/.test(msg);
     const err = /^(Zu wenig|Raum ist voll|Kein|Keine|Noch nicht|Stromausfall|Marktcrash|Hack!|Defekt|Kreditlimit)/.test(msg);
     if (/^(Mission|Erfolg)/.test(msg)) sfx.win();
     if (/^(Zu wenig|Raum ist voll|Kein|Keine|Noch nicht|Kreditlimit)/.test(msg)) sfx.error();
@@ -305,11 +305,13 @@ export class HUD {
     return head + GADGETS.map((g, i) => {
       const locked = !game.gadgetUnlocked(g);
       const cost = game.gadgetCost(g);
-      const lines = coins.map((c) => {
+      const ok = coins.filter((c) => game.canMine(g.id, c.id));
+      const lines = ok.length === 0 ? '<span class="bad">kein freigeschalteter Coin</span>' : ok.map((c) => {
         const n = game.netPerSec(g.id, c.id);
         return `<span style="color:${c.color}">${c.id}</span> <span class="${n >= 0 ? 'good' : 'bad'}">${n >= 0 ? '+' : ''}${num(n, n < 10 ? 2 : 0)}</span>`;
       }).join(' · ');
-      const best = Math.max(...coins.map((c) => game.netPerSec(g.id, c.id)));
+      const best = Math.max(-Infinity, ...ok.map((c) => game.netPerSec(g.id, c.id)));
+      const no = coins.filter((c) => !game.canMine(g.id, c.id)).map((c) => c.id);
       const roi = best > 0 ? `<span class="good">Amortisation ca. ${num(cost / best / 60, 1)} min</span>` : '<span class="bad">Bei aktuellem Kurs unrentabel</span>';
       return `<div class="card ${locked ? 'lock' : ''}" style="--c:${hex(g.ledColor)}">
         <div class="head">${icon(g, i)}
@@ -322,7 +324,7 @@ export class HUD {
           ${bar('Hitze', g.heat, maxT, num(g.heat), '#ff6a3d')}
         </div>
         ${locked ? `<div class="lockmsg">🔒 Erforsche „${techDef(g.unlock!).name}“ im Tech-Tab.</div>` : ''}
-        <div class="row"><span class="roi">${roi}<br><span class="muted">Netto €/s: ${lines}</span></span>
+        <div class="row"><span class="roi">${roi}<br><span class="muted">Netto €/s: ${lines}</span>${no.length ? `<br><span class="muted" style="opacity:.7">Zu schwach für: ${no.join(', ')}</span>` : ''}</span>
           <div class="btns" style="margin:0;flex-wrap:nowrap"><button data-act="sell-gadget" data-id="${g.id}" ${(game.s.inv[g.id] ?? 0) < 1 ? 'disabled' : ''}>Verk. ${eur(Math.round(g.cost * 0.5))}</button><button class="buy" data-act="buy-gadget" data-id="${g.id}" data-cost="${cost}" data-locked="${locked || full ? 1 : 0}" ${locked || full ? 'disabled' : ''}>${sale ? `<span class="old">${eur(g.cost)}</span>` : ''}${eur(cost)}</button></div></div>
       </div>`;
     }).join('');
@@ -344,6 +346,9 @@ export class HUD {
     const solo = game.s.mode === 'solo';
     let h = `<div class="seg"><button data-act="mode" data-m="pool" class="${!solo ? 'on' : ''}">⛏️ Pool</button><button data-act="mode" data-m="solo" class="${solo ? 'on' : ''}">🎰 Solo</button></div>
       <div class="muted" style="margin:-4px 2px 10px">${solo ? 'Solo: Blockfunde alle ca. 25 s, im Schnitt +12 % Ertrag, aber unregelmäßig.' : `Pool: stetiger Ertrag, ${Math.round(POOL_FEE * 100)} % Gebühr.`}</div>`;
+    if (game.news.length) {
+      h += `<div class="card" style="--c:#3a4a7a"><div class="row"><span class="name">📰 Börsen-News</span></div>${game.news.map((n) => `<div class="muted" style="margin-top:4px"><span class="${n.up ? 'good' : 'bad'}">${n.up ? '▲' : '▼'}</span> ${n.msg} <span style="opacity:.6">· vor ${dur((Date.now() - n.at) / 1000)}</span></div>`).join('')}</div>`;
+    }
     for (const c of COINS) {
       const locked = !game.coinUnlocked(c);
       const hs = game.history[c.id];
@@ -355,6 +360,7 @@ export class HUD {
         <div class="row"><span class="name"><span style="color:${c.color}">●</span> ${c.name} <span class="muted">${c.id}</span></span>
           <span><b>${game.prices[c.id] < 10 ? num(game.prices[c.id], 2) : num(game.prices[c.id], 1)} €</b> <span class="${chg >= 0 ? 'good' : 'bad'}" style="font-size:11px">${chg >= 0 ? '▲' : '▼'} ${num(Math.abs(chg), 1)} %</span></span></div>
         <div class="muted">${c.desc}</div>
+        <div class="muted" style="margin-top:3px">⛏️ Min. ${num(c.minHash)} H/s je Gerät · geeignet: ${GADGETS.filter((g) => game.canMine(g.id, c.id)).map((g) => g.name).join(', ') || '–'}</div>
         ${locked ? `<div class="lockmsg">🔒 Erforsche „${techDef(c.unlock!).name}“.</div>` : `<canvas class="mini" data-coin="${c.id}"></canvas>
         ${kv('Wallet', `${num(w, 4)} ${c.id}`)}${kv('Gestaked (+0,25 %/min)', `${num(st, 4)} ${c.id}`)}${kv('Wert gesamt', eur(value))}
         <div class="btns">
@@ -491,13 +497,13 @@ export class HUD {
       }
       const cond = game.s.cond[r.id] ?? 100;
       const rc = game.repairCost(r.id);
-      const cur = game.s.roomCoin[r.id] ?? 'BIT';
+      const cur = game.s.roomCoin[r.id] ?? DEFAULT_COIN;
       return `<div class="card" style="--c:${active ? 'var(--acc)' : '#3a4a7a'}">
         <div class="row"><span class="name">🏠 ${r.name}</span><button data-act="room" data-id="${r.id}" class="${active ? 'on' : ''}">${active ? 'Aktiv' : 'Wechseln'}</button></div>
         <div class="bars">${bar('Slots', r.spots.length, 20, `${r.spots.length}`, '#8c7bff')}${bar('Kühlung', r.maxHeat, 5200, num(r.maxHeat), '#4fd1c5')}${bar('Zustand', cond, 100, `${num(cond)} %`, cond < 40 ? '#ff6a3d' : cond < 70 ? '#ffc857' : '#7ee787')}</div>
         ${kv('Miete', `${num(r.rent, 2)} €/s`)}
         <div class="row" style="margin-top:4px"><span class="muted">Mining-Münze</span></div>
-        <div class="chips">${COINS.filter((c) => game.coinUnlocked(c)).map((c) => `<button data-act="room-coin" data-id="${r.id}" data-coin="${c.id}" class="${cur === c.id ? 'on' : ''}" style="${cur === c.id ? '' : `color:${c.color}`}">${c.id}</button>`).join('')}</div>
+        ${this.coinChips(r.id)}
         <div class="row" style="margin-top:8px"><span class="muted">Reparatur</span><button data-act="repair" data-id="${r.id}" data-cost="${rc}" ${rc <= 0 ? 'disabled' : ''}>${rc <= 0 ? 'Top Zustand' : `Reparieren ${eur(rc)}`}</button></div>
       </div>`;
     }).join('');
@@ -518,10 +524,31 @@ export class HUD {
       <div class="btns"><button data-act="settings">⚙️ Einstellungen</button><button data-act="tutorial">❓ Anleitung</button></div>`;
   }
 
+  /** Coin-Auswahl eines Raums; Coins, die kein Gerät im Raum schafft, sind gedimmt. */
+  private coinChips(roomId: string): string {
+    const cur = game.s.roomCoin[roomId] ?? DEFAULT_COIN;
+    const items = (game.s.rooms[roomId] ?? []).filter((x): x is string => !!x);
+    return `<div class="chips">${COINS.filter((c) => game.coinUnlocked(c)).map((c) => {
+      const ok = items.filter((g) => game.canMine(g, c.id)).length;
+      const weak = items.length > 0 && ok === 0;
+      return `<button data-act="room-coin" data-id="${roomId}" data-coin="${c.id}" class="${cur === c.id ? 'on' : ''} ${weak ? 'weak' : ''}" style="${cur === c.id ? '' : `color:${c.color}`}" title="min. ${c.minHash} H/s je Gerät · ${ok}/${items.length} Geräte geeignet">${c.id}${c.minHash ? `<small> ${num(c.minHash)}+</small>` : ''}</button>`;
+    }).join('')}</div>`;
+  }
+
   private renderRooms() {
-    $('rooms').innerHTML = ROOMS.filter((r) => game.s.rooms[r.id])
-      .map((r) => `<button class="chip glass ${r.id === game.s.active ? 'on' : ''}" data-act="room" data-id="${r.id}">${r.name}</button>`)
-      .join('');
+    const owned = ROOMS.filter((r) => game.s.rooms[r.id]);
+    const next = ROOMS.find((r) => !game.s.rooms[r.id]);
+    const chips = owned.map((r) => {
+      const slots = game.s.rooms[r.id];
+      const n = slots.filter(Boolean).length;
+      return `<button class="chip glass ${r.id === game.s.active ? 'on' : ''}" data-act="room" data-id="${r.id}">🏠 ${r.name} <small>${n}/${slots.length}</small></button>`;
+    });
+    if (next) chips.push(`<button class="chip glass buy" data-act="buy-room" data-id="${next.id}" data-cost="${next.cost}">＋ ${next.name} · ${eur(next.cost)}</button>`);
+    const i = owned.findIndex((r) => r.id === game.s.active);
+    const prev = owned[(i - 1 + owned.length) % owned.length].id;
+    const nxt = owned[(i + 1) % owned.length].id;
+    const arrows = owned.length > 1 ? [`<button class="chip glass arrow" data-act="room" data-id="${prev}" title="Vorheriger Raum">◀</button>`, `<button class="chip glass arrow" data-act="room" data-id="${nxt}" title="Nächster Raum">▶</button>`] : [];
+    $('rooms').innerHTML = `<div class="roomrow">${arrows[0] ?? ''}${chips.join('')}${arrows[1] ?? ''}</div><div class="coinrow"><span class="muted">⛏️ Mint:</span>${this.coinChips(game.s.active).replace('<div class="chips">', '').replace(/<\/div>$/, '')}</div>`;
   }
 
   private renderQuest() {
@@ -554,17 +581,76 @@ export class HUD {
     if (nc) drawLine(nc, game.s.netHistory.length > 1 ? game.s.netHistory : [0, 0], '#ffc857');
   }
 
+  private flyEl: HTMLButtonElement | null = null;
+  private flyY = 0;
+
+  /** Fliegende Bonus-Drohne über der Szene bewegen, anklickbar. */
+  private updateFlyer() {
+    const f = game.flyer;
+    if (!f) {
+      if (this.flyEl) { const el = this.flyEl; this.flyEl = null; el.classList.add('gone'); setTimeout(() => el.remove(), 400); }
+      return;
+    }
+    const mobile = window.innerWidth < 900;
+    const W = mobile ? window.innerWidth : window.innerWidth - 356;
+    if (!this.flyEl) {
+      const el = document.createElement('button');
+      el.className = 'flyer';
+      el.innerHTML = '<span>🛸</span><i>🎁</i>';
+      el.addEventListener('pointerdown', (e) => {
+        e.stopPropagation();
+        const r = el.getBoundingClientRect();
+        const msg = game.catchFlyer();
+        if (!msg) return;
+        sfx.win();
+        this.floaty(r.left + r.width / 2, r.top, msg);
+        this.toast(`Bonus: ${msg}`);
+        el.remove();
+        this.flyEl = null;
+      });
+      $('hud').appendChild(el);
+      this.flyEl = el;
+      const H = window.innerHeight;
+      this.flyY = mobile ? H * (0.2 + Math.random() * 0.15) : H * (0.25 + Math.random() * 0.3);
+    }
+    const p = 1 - f.t / f.total;
+    const x = -70 + (W + 140) * p;
+    const y = this.flyY + Math.sin(p * Math.PI * 6) * 22;
+    this.flyEl.style.transform = `translate(${x}px, ${y}px) rotate(${Math.sin(p * Math.PI * 12) * 8}deg)`;
+  }
+
+  private floaty(x: number, y: number, text: string) {
+    const d = document.createElement('div');
+    d.className = 'floaty';
+    d.textContent = text;
+    d.style.left = `${x}px`;
+    d.style.top = `${y}px`;
+    $('hud').appendChild(d);
+    setTimeout(() => d.remove(), 1600);
+  }
+
+  private renderBoosts() {
+    const html = Object.entries(BOOST_INFO).filter(([id]) => game.boostOn(id)).map(([id, b]) => {
+      const left = game.boostLeft(id);
+      return `<div class="boost glass"><b>${b.icon} ${b.name}</b> ${Math.ceil(left)} s<div class="track"><div class="fill" style="width:${(left / b.total) * 100}%;--b:var(--gold)"></div></div></div>`;
+    }).join('');
+    const el = $('boosts');
+    if (el.innerHTML !== html) el.innerHTML = html;
+  }
+
   private loop() {
     const now = performance.now();
     const dt = (now - this.lastTs) / 1000;
     this.lastTs = now;
-    const coin = game.s.roomCoin[game.s.active] ?? 'BIT';
+    const coin = game.s.roomCoin[game.s.active] ?? DEFAULT_COIN;
     this.cash.set(game.s.cash);
     this.coins.set(game.s.wallet[coin] ?? 0);
     this.price.set(game.prices[coin]);
     this.hash.set(game.hashTotal);
     this.debt.set(game.s.debt);
     this.cash.tick(); this.coins.tick(); this.price.tick(); this.hash.tick(); this.debt.tick();
+    $('coinLbl').textContent = coin;
+    this.updateFlyer();
     $('cash').classList.toggle('neg', game.s.cash < 0);
 
     this.slow += dt;
@@ -627,6 +713,8 @@ export class HUD {
       if (lbl) lbl.textContent = `noch ${dur(left)}`;
     }
 
+    this.renderBoosts();
+
     // Dock
     const room = ROOMS.find((x) => x.id === game.s.active)!;
     const st = game.roomStats[room.id];
@@ -637,7 +725,7 @@ export class HUD {
       fill.className = `fill ${ratio >= 1 ? 'hot' : ratio > 0.7 ? 'warn' : 'ok'}`;
       $('roomName').innerHTML = `<b>${room.name}</b>`;
       $('heatTxt').textContent = `Hitze ${num(st.heat)} / ${num(st.limit)}${st.throttle < 1 ? ` · gedrosselt ${num(st.throttle * 100)} %` : ''}`;
-      $('roomSub').textContent = `${num(st.hash)} H/s · ${num(st.power)} W · Zustand ${num(st.cond)} % · ${coin}`;
+      $('roomSub').innerHTML = `${num(st.hash)} H/s · ${num(st.power)} W · Zustand ${num(st.cond)} % · ${coin}${st.idle ? ` · <span class="bad">${st.idle} Gerät(e) zu schwach für ${coin}</span>` : ''}`;
     }
     const total = game.coinValue() - COINS.reduce((a, c) => a + (game.s.staked[c.id] ?? 0) * game.prices[c.id], 0);
     $('sell50').textContent = `50 % · ${eur(total * 0.5)}`;

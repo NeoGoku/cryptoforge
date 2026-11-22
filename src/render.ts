@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { game } from './game';
-import { gadgetDef, roomDef } from './config';
+import { DEFAULT_COIN, gadgetDef, roomDef } from './config';
 import type { RoomDef } from './config';
 import { sfx } from './audio';
 import { DPR } from './env';
@@ -498,16 +498,17 @@ export class MainScene extends Phaser.Scene {
     const poly = [P(u, v, 3), P(u + 1.2, v, 3), P(u + 1.2, v + 1.2, 3), P(u, v + 1.2, 3)];
     if (id) {
       const gd = gadgetDef(id);
+      const idle = !game.canMine(id, game.s.roomCoin[game.s.active] ?? DEFAULT_COIN);
       box(g, u + 0.15, v + 0.15, 0.9, 0.9, gd.size, gd.color, 3, 3);
       const f = P(u + 0.6, v + 0.6, 3 + gd.size);
       g.fillStyle(0x10131c, 1);
       g.fillEllipse(f.x, f.y, 40 * zoom, 20 * zoom);
       g.lineStyle(1.5 * DPR, shade(gd.color, 1.3), 0.8);
       g.strokeEllipse(f.x, f.y, 40 * zoom, 20 * zoom);
-      this.fans.push({ x: f.x, y: f.y, hot });
+      if (!idle) this.fans.push({ x: f.x, y: f.y, hot });
       for (let k = 0; k < 2; k++) {
         const led = P(u + 1.05, v + 0.3 + k * 0.45, 3 + gd.size * 0.55);
-        this.ledPts.push({ x: led.x, y: led.y, c: hot ? 0xff6a3d : gd.ledColor, phase: idx * 1.3 + k });
+        this.ledPts.push({ x: led.x, y: led.y, c: idle ? 0x3a3f4f : hot ? 0xff6a3d : gd.ledColor, phase: idx * 1.3 + k });
       }
     }
     const c = P(u + 0.6, v + 0.6);
@@ -560,6 +561,7 @@ export class MainScene extends Phaser.Scene {
       case 'block': this.burst(c.x, c.y, 0xffc857, 24); this.floatText(c.x, c.y - 30 * DPR, 'BLOCK GEFUNDEN!', '#ffd479'); break;
       case 'research': this.burst(c.x, c.y, 0x8c7bff, 24); break;
       case 'repair': this.burst(c.x, c.y, 0x7ee787, 16); break;
+      case 'bonus': this.burst(c.x, c.y, 0xffc857, 22); break;
       case 'prestige': this.cameras.main.flash(600, 255, 255, 255); this.burst(c.x, c.y, 0xffffff, 40); break;
       case 'win': this.burst(c.x, c.y, 0xffc857, 18); break;
     }
