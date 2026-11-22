@@ -1,5 +1,9 @@
-import { GADGETS, ROOMS, COINS, LOANS, DEFAULT_COIN, canMine, gadgetDef, roomDef, upgradeDef, upgradeCost, coinDef, techDef, staffDef, staffCost } from './config';
-import type { GadgetDef, CoinDef } from './config';
+import { ROOMS, COINS, LOANS, DEFAULT_COIN, canMine, roomDef, upgradeDef, upgradeCost, coinDef, techDef, staffDef, staffCost } from './config';
+import type { CoinDef, Kind } from './config';
+import { PARTS, PREBUILT, CATS, partDef, prebuiltDef, buildStats, machineStats, buildPartList, emptyBuild, cloneBuild } from './hardware';
+import type { Machine, MachineStat, Blueprint, Build, PartCat, HwMarket } from './hardware';
+import { makeHolders, makeAddr, holderValue, shortAddr } from './world';
+import type { Holder } from './world';
 
 export const BASE_TARIFF = 0.32;   // EUR/kWh
 export const POWER_SCALE = 5000;   // 1 s Spielzeit = 5000 s Stromverbrauch (macht Strom relevant)
@@ -21,11 +25,11 @@ export type EvId = 'outage' | 'heat' | 'sale';
 
 export interface Stats {
   events: number; outages: number; hacked: number; blocks: number; repairs: number;
-  loans: number; repaid: number; powerSpent: number; rentPaid: number; interestPaid: number; clicks: number; salaryPaid: number; bonuses: number;
+  loans: number; repaid: number; powerSpent: number; rentPaid: number; interestPaid: number; clicks: number; salaryPaid: number; bonuses: number; built: number; bargains: number;
 }
 
 export interface SaveData {
-  v: 2;
+  v: 3;
   boosts: Record<string, number>; // Bonus-ID → Ende (playSec)
   cash: number;
   wallet: Record<string, number>;
@@ -34,7 +38,12 @@ export interface SaveData {
   minedTotal: number;
   bought: number;
   playSec: number;
-  inv: Record<string, number>;
+  machines: Record<string, Machine>;   // alle Miner; Raum-Slots enthalten deren IDs
+  parts: Record<string, number>;       // lose Einzelteile im Lager
+  blueprints: Blueprint[];
+  draft: Build;                        // aktuelle Konfiguration in der Werkstatt
+  mid: number;                         // Zähler für Maschinen-IDs
+  addr: string;                        // eigene Wallet-Adresse
   rooms: Record<string, Slots>;
   cond: Record<string, number>;
   roomCoin: Record<string, string>;
@@ -67,28 +76,34 @@ export interface Achievement { id: string; name: string; desc: string; test: (g:
 const mk = (title: string, desc: string, reward: number, done: (g: Game) => boolean, prog: (g: Game) => [number, number]): Mission => ({ title, desc, reward, done, prog });
 const min1 = (v: number, t: number): [number, number] => [Math.min(v, t), t];
 
+const maxGpus = (g: Game): number => Object.values(g.s.machines).reduce((a, m) => Math.max(a, m.build?.gpus.length ?? 0), 0);
+
 export const MISSIONS: Mission[] = [
-  mk('Erster Rig', 'Kaufe ein Gadget.', 200, (g) => g.s.bought >= 1, (g) => min1(g.s.bought, 1)),
+  mk('Erster Miner', 'Baue in der Werkstatt einen PC mit Grafikkarte.', 200, (g) => g.s.stats.built >= 1, (g) => min1(g.s.stats.built, 1)),
   mk('Erster Verkauf', 'Verkaufe Coins im Wert von 20 €.', 300, (g) => g.s.soldEur >= 20, (g) => min1(g.s.soldEur, 20)),
   mk('Kinderzimmer voll', 'Belege alle Slots im Kinderzimmer.', 500, (g) => g.roomFull('kid'), (g) => [(g.s.rooms.kid ?? []).filter(Boolean).length, 2]),
   mk('Kühlung I', 'Kaufe Kühlsystem Stufe 1.', 400, (g) => (g.s.upgrades.cool ?? 0) >= 1, (g) => min1(g.s.upgrades.cool ?? 0, 1)),
+  mk('Blaupause', 'Speichere eine Konfiguration als Blueprint.', 300, (g) => g.s.blueprints.length >= 1, (g) => min1(g.s.blueprints.length, 1)),
   mk('Lagerraum beziehen', 'Schalte den Lagerraum frei.', 1000, (g) => !!g.s.rooms.store, (g) => [g.s.rooms.store ? 1 : 0, 1]),
+  mk('Rig-Bauer', 'Baue einen offenen Rig mit mindestens 4 Grafikkarten.', 1200, (g) => maxGpus(g) >= 4, (g) => min1(maxGpus(g), 4)),
   mk('Forschung', 'Starte deine erste Forschung.', 600, (g) => g.s.research.length > 0 || !!g.s.researching, (g) => [g.s.research.length > 0 || g.s.researching ? 1 : 0, 1]),
-  mk('Zweite Münze', 'Mine BitForge (braucht ein ASIC mit 100+ H/s).', 800, (g) => (g.rate.BIT ?? 0) > 0, (g) => [(g.rate.BIT ?? 0) > 0 ? 1 : 0, 1]),
+  mk('Zweite Münze', 'Mine BitForge (100+ H/s je Gerät, z. B. ein ASIC).', 800, (g) => (g.rate.BIT ?? 0) > 0, (g) => [(g.rate.BIT ?? 0) > 0 ? 1 : 0, 1]),
   mk('Abgesichert', 'Schließe die Versicherung ab.', 700, (g) => g.s.insured, (g) => [g.s.insured ? 1 : 0, 1]),
   mk('Techniker', 'Stelle einen Techniker ein.', 900, (g) => (g.s.staff.tech ?? 0) >= 1, (g) => min1(g.s.staff.tech ?? 0, 1)),
   mk('Kreditwürdig', 'Nimm einen Kredit auf.', 1000, (g) => g.s.stats.loans >= 1, (g) => min1(g.s.stats.loans, 1)),
   mk('Garage', 'Schalte die Garage frei.', 4000, (g) => !!g.s.rooms.garage, (g) => [g.s.rooms.garage ? 1 : 0, 1]),
+  mk('Großrig', 'Baue einen Rig mit 8 Grafikkarten.', 3000, (g) => maxGpus(g) >= 8, (g) => min1(maxGpus(g), 8)),
   mk('Automatisierung', 'Erforsche Auto-Verkauf.', 3000, (g) => g.s.research.includes('auto'), (g) => [g.s.research.includes('auto') ? 1 : 0, 1]),
   mk('Vermögend', 'Erreiche 50.000 € Vermögen.', 10000, (g) => g.netWorth() >= 50000, (g) => min1(Math.max(0, g.netWorth()), 50000)),
+  mk('Auf der Liste', 'Erreiche Platz 50 der Rich List im Explorer.', 5000, (g) => g.myRank() <= 50, (g) => [g.myRank() <= 50 ? 1 : 0, 1]),
   mk('Quantensprung', 'Erforsche Quantum-Hardware.', 20000, (g) => g.s.research.includes('quantum'), (g) => [g.s.research.includes('quantum') ? 1 : 0, 1]),
   mk('Neustart', 'Führe einen Prestige-Neustart durch.', 25000, (g) => g.s.prestige.resets >= 1, (g) => [Math.min(g.s.prestige.resets, 1), 1]),
   mk('Kühlung III', 'Kaufe Kühlsystem Stufe 3.', 2500, (g) => (g.s.upgrades.cool ?? 0) >= 3, (g) => min1(g.s.upgrades.cool ?? 0, 3)),
-  mk('Fünf Rigs', 'Besitze insgesamt 5 Gadgets.', 1500, (g) => g.totalGadgets() >= 5, (g) => min1(g.totalGadgets(), 5)),
+  mk('Fünf Miner', 'Besitze insgesamt 5 Miner.', 1500, (g) => g.totalGadgets() >= 5, (g) => min1(g.totalGadgets(), 5)),
   mk('Stromsparer', 'Erforsche die Effizienz-Firmware.', 2000, (g) => g.has('eff'), (g) => min1(g.has('eff') ? 1 : 0, 1)),
   mk('Staker', 'Stake Coins.', 2500, (g) => Object.values(g.s.staked).some((v) => v > 0), (g) => min1(Object.values(g.s.staked).some((v) => v > 0) ? 1 : 0, 1)),
   mk('Blockfinder', 'Finde 5 Blöcke im Solo-Modus.', 3000, (g) => g.s.stats.blocks >= 5, (g) => min1(g.s.stats.blocks, 5)),
-  mk('Zehn Plätze', 'Stelle 10 Gadgets auf.', 4000, (g) => g.placedCount() >= 10, (g) => min1(g.placedCount(), 10)),
+  mk('Zehn Plätze', 'Stelle 10 Miner auf.', 4000, (g) => g.placedCount() >= 10, (g) => min1(g.placedCount(), 10)),
   mk('Garage voll', 'Belege alle Slots der Garage.', 8000, (g) => g.roomFull('garage'), (g) => [(g.s.rooms.garage ?? []).filter(Boolean).length, 6]),
   mk('Hunderttausend', 'Erreiche 100.000 € Vermögen.', 12000, (g) => g.netWorth() >= 100000, (g) => min1(Math.max(0, g.netWorth()), 100000)),
   mk('Industriehalle', 'Schalte die Industriehalle frei.', 20000, (g) => !!g.s.rooms.hall, (g) => [g.s.rooms.hall ? 1 : 0, 1]),
@@ -96,7 +111,8 @@ export const MISSIONS: Mission[] = [
   mk('Fusionskern', 'Erforsche den Fusionskern.', 50000, (g) => g.has('fusion'), (g) => min1(g.has('fusion') ? 1 : 0, 1)),
   mk('Drohnenjäger', 'Fange 3 fliegende Bonus-Drohnen.', 1500, (g) => g.s.stats.bonuses >= 3, (g) => min1(g.s.stats.bonuses, 3)),
   mk('Luxus-Mining', 'Mine Luxar (braucht 500+ H/s je Gerät).', 15000, (g) => (g.rate.LUX ?? 0) > 0, (g) => [(g.rate.LUX ?? 0) > 0 ? 1 : 0, 1]),
-  mk('Quantensprung', 'Mine Qubit mit einem Quantenrechner.', 40000, (g) => (g.rate.QBT ?? 0) > 0, (g) => [(g.rate.QBT ?? 0) > 0 ? 1 : 0, 1]),
+  mk('Top 10', 'Erreiche die Top 10 der Rich List.', 50000, (g) => g.myRank() <= 10, (g) => [g.myRank() <= 10 ? 1 : 0, 1]),
+  mk('Qubit-Mining', 'Mine Qubit mit einem Quantenrechner.', 40000, (g) => (g.rate.QBT ?? 0) > 0, (g) => [(g.rate.QBT ?? 0) > 0 ? 1 : 0, 1]),
   mk('Sonnenkraft', 'Mine Helion mit einem Fusion Core.', 120000, (g) => (g.rate.HEL ?? 0) > 0, (g) => [(g.rate.HEL ?? 0) > 0 ? 1 : 0, 1]),
 ];
 
@@ -104,7 +120,7 @@ const ach = (id: string, name: string, desc: string, test: (g: Game) => boolean)
 
 export const ACHIEVEMENTS: Achievement[] = [
   ach('first', 'Erster Hash', 'Insgesamt 1 Coin gemined.', (g) => g.s.minedTotal >= 1),
-  ach('placed', 'Rig-Besitzer', 'Ein Gadget platziert.', (g) => g.placedCount() >= 1),
+  ach('placed', 'Rig-Besitzer', 'Einen Miner aufgestellt.', (g) => g.placedCount() >= 1),
   ach('kilo', 'Kilohash', '1.000 H/s Gesamtleistung.', (g) => g.hashTotal >= 1000),
   ach('mega', 'Megahash', '10.000 H/s Gesamtleistung.', (g) => g.hashTotal >= 10000),
   ach('sell', 'Händler', 'Coins im Wert von 1.000 € verkauft.', (g) => g.s.soldEur >= 1000),
@@ -129,7 +145,31 @@ export const ACHIEVEMENTS: Achievement[] = [
   ach('catch50', 'Himmelsjäger', '50 Bonus-Drohnen gefangen.', (g) => g.s.stats.bonuses >= 50),
   ach('diverse', 'Diversifiziert', '4 verschiedene Coins gleichzeitig im Wallet.', (g) => COINS.filter((c) => (g.s.wallet[c.id] ?? 0) > 1e-9).length >= 4),
   ach('helion', 'Sonnenkönig', 'Helion gemined.', (g) => (g.s.wallet.HEL ?? 0) + (g.s.staked.HEL ?? 0) > 0),
+  ach('builder', 'Schrauber', '10 Miner selbst gebaut.', (g) => g.s.stats.built >= 10),
+  ach('rig12', 'Monster-Rig', 'Einen Rig mit 12 Grafikkarten gebaut.', (g) => maxGpus(g) >= 12),
+  ach('bargain', 'Schnäppchenjäger', 'Hardware unter 85 % des Normalpreises gekauft.', (g) => g.s.stats.bargains >= 1),
+  ach('top10', 'Krypto-Elite', 'Top 10 der Rich List.', (g) => g.myRank() <= 10),
+  ach('top1', 'Reichste Wallet der Welt', 'Platz 1 der Rich List.', (g) => g.myRank() <= 1),
 ];
+
+const HW_NEWS: Record<HwMarket, { up: string[]; down: string[] }> = {
+  gpu: {
+    up: ['Mining-Boom: Grafikkarten ausverkauft', 'Chip-Knappheit bei Kartenherstellern', 'Neues Spiel treibt GPU-Nachfrage', 'Lieferengpass bei Grafikspeicher'],
+    down: ['Neue GPU-Generation vorgestellt – Altkarten günstiger', 'Großfarm verkauft gebrauchte Karten', 'Mining-Verbot in Großregion – GPUs fluten den Markt', 'Händler räumen Lager'],
+  },
+  asic: {
+    up: ['ASIC-Hersteller meldet Lieferverzug', 'Mining-Konzerne kaufen ASICs auf', 'Zollerhöhung auf Mining-Hardware'],
+    down: ['Neue ASIC-Generation macht alte Modelle billiger', 'ASIC-Überproduktion', 'Pleite einer Mining-Firma: ASICs im Abverkauf'],
+  },
+  parts: {
+    up: ['Speicherpreise steigen', 'Netzteil-Knappheit nach Fabrikbrand', 'Rohstoffpreise treiben Hardwarekosten'],
+    down: ['Black-Week-Rabatte auf PC-Teile', 'Überangebot an Mainboards', 'Speicherpreise fallen'],
+  },
+};
+/** Startrechner im Kinderzimmer: alter Büro-PC ohne Grafikkarte. */
+const STARTER_PC: Build = { parts: { case: 'case_office', board: 'mb_t1', cpu: 'cpu_c4', ram: 'ram8', ssd: 'ssd128', psu: 'psu450' }, gpus: [] };
+
+const HW_NAMES: Record<HwMarket, string> = { gpu: 'GPU-Preise', asic: 'ASIC-Preise', parts: 'PC-Teile' };
 
 export interface BonusDef { id: string; icon: string; w: number; }
 export const BONUSES: BonusDef[] = [
@@ -176,6 +216,15 @@ export class Game {
   offlineGain = 0;
   offlineEur = 0;
 
+  /** Hardware-Preisindex je Markt (1 = Normalpreis). */
+  hw: Record<HwMarket, number> = { gpu: 1, asic: 1, parts: 1 };
+  hwHistory: Record<HwMarket, number[]> = { gpu: [1], asic: [1], parts: [1] };
+  holders: Holder[] = makeHolders();
+  private hwNewsTimer = 110;
+  private whaleTimer = 140;
+  private worldTimer = 0;
+  private snapTimer = 0;
+  private statCache = new Map<string, MachineStat>();
   private regimeTimer = 90;
   private newsTimer = 75;
   private flyerTimer = 25;
@@ -197,6 +246,12 @@ export class Game {
       this.history[c.id] = [c.base];
     }
     this.recalc();
+    if (this.remapMission) {
+      let i = 0;
+      while (i < MISSIONS.length && MISSIONS[i].done(this)) i++;
+      this.s.mission = i;
+      this.remapMission = false;
+    }
     this.applyOffline();
   }
 
@@ -217,6 +272,7 @@ export class Game {
   }
 
   private afterChange() {
+    this.statCache.clear();
     this.recalc();
     this.save();
     this.emit('change');
@@ -236,8 +292,8 @@ export class Game {
     return this.s.research.includes(tech);
   }
 
-  gadgetUnlocked(g: GadgetDef): boolean {
-    return !g.unlock || this.has(g.unlock);
+  unlocked(x: { unlock?: string }): boolean {
+    return !x.unlock || this.has(x.unlock);
   }
 
   coinUnlocked(c: CoinDef): boolean {
@@ -254,8 +310,78 @@ export class Game {
     return { id: e.id, ...EV_NAMES[e.id], left: Math.max(0, e.until - this.s.playSec), total: e.total };
   }
 
-  gadgetCost(g: GadgetDef): number {
-    return Math.round(g.cost * (this.s.ev?.id === 'sale' ? 0.7 : 1));
+  private saleF(): number {
+    return this.s.ev?.id === 'sale' ? 0.7 : 1;
+  }
+
+  /** Aktueller Kaufpreis eines Einzelteils (Hardware-Index, Sale). */
+  partPrice(id: string): number {
+    const p = partDef(id);
+    return Math.max(1, Math.round(p.cost * this.hw[CATS[p.cat].market] * this.saleF()));
+  }
+
+  /** Aktueller Kaufpreis eines Fertig-Miners. */
+  prePrice(id: string): number {
+    return Math.max(1, Math.round(prebuiltDef(id).cost * this.hw.asic * this.saleF()));
+  }
+
+  /** Wiederverkaufswert (50 % des aktuellen Marktpreises, ohne Sale). */
+  partSellValue(id: string): number {
+    const p = partDef(id);
+    return Math.round(p.cost * this.hw[CATS[p.cat].market] * 0.5);
+  }
+
+  machineValue(m: Machine): number {
+    if (m.pre) return prebuiltDef(m.pre).cost * this.hw.asic;
+    return buildPartList(m.build ?? emptyBuild()).reduce((a, id) => a + partDef(id).cost * this.hw[CATS[partDef(id).cat].market], 0);
+  }
+
+  machineSellValue(m: Machine): number {
+    return Math.round(this.machineValue(m) * 0.5);
+  }
+
+  /** Werte einer Maschine (gecacht, wird bei jeder Änderung neu berechnet). */
+  mstat(id: string): MachineStat {
+    let st = this.statCache.get(id);
+    if (!st) {
+      const m = this.s.machines[id];
+      st = m ? machineStats(m) : { name: '?', kind: 'cpu', model: 'tower', hash: 0, watts: 0, heat: 0, color: 0x444444, ledColor: 0x444444, gpus: [], maxGpu: 0 };
+      this.statCache.set(id, st);
+    }
+    return st;
+  }
+
+  /** Maschinen, die nicht in einem Raum stehen. */
+  unplaced(): Machine[] {
+    const placed = new Set<string>();
+    for (const r in this.s.rooms) for (const x of this.s.rooms[r]) if (x) placed.add(x);
+    return Object.values(this.s.machines).filter((m) => !placed.has(m.id));
+  }
+
+  roomOf(id: string): string | null {
+    for (const r in this.s.rooms) if (this.s.rooms[r].includes(id)) return r;
+    return null;
+  }
+
+  partsCount(): number {
+    return Object.values(this.s.parts).reduce((a, b) => a + b, 0);
+  }
+
+  /** Kosten der fehlenden Teile einer Konfiguration (Lagerteile werden zuerst verwendet). */
+  missingCost(b: Build): { cost: number; missing: string[] } {
+    const stock = { ...this.s.parts };
+    const missing: string[] = [];
+    for (const id of buildPartList(b)) {
+      if ((stock[id] ?? 0) > 0) stock[id]--;
+      else missing.push(id);
+    }
+    return { cost: missing.reduce((a, id) => a + this.partPrice(id), 0), missing };
+  }
+
+  /** Platz in der Rich List (1 = reichste Wallet). */
+  myRank(): number {
+    const me = this.netWorth();
+    return 1 + this.holders.filter((h) => holderValue(h, this.prices) > me).length;
   }
 
   roomFull(id: string): boolean {
@@ -274,17 +400,18 @@ export class Game {
   }
 
   totalGadgets(): number {
-    return Object.values(this.s.inv).reduce((a, b) => a + b, 0) + this.placedCount();
+    return Object.keys(this.s.machines).length;
   }
 
-  owned(id: string): number {
-    let n = this.s.inv[id] ?? 0;
-    for (const r in this.s.rooms) n += this.s.rooms[r].filter((x) => x === id).length;
-    return n;
+  /** Anzahl Fertig-Miner eines Modells. */
+  owned(preId: string): number {
+    return Object.values(this.s.machines).filter((m) => m.pre === preId).length;
   }
 
+  /** Marktwert aller Miner und losen Teile. */
   gadgetValue(): number {
-    return GADGETS.reduce((a, g) => a + this.owned(g.id) * g.cost, 0);
+    const parts = Object.entries(this.s.parts).reduce((a, [id, n]) => a + this.partPrice(id) * n, 0);
+    return Object.values(this.s.machines).reduce((a, m) => a + this.machineValue(m), 0) + parts;
   }
 
   coinValue(): number {
@@ -326,7 +453,7 @@ export class Game {
 
   repairCost(roomId: string): number {
     const slots = this.s.rooms[roomId] ?? [];
-    const val = slots.reduce((a, id) => a + (id ? gadgetDef(id).cost : 0), 0);
+    const val = slots.reduce((a, id) => a + (id && this.s.machines[id] ? this.machineValue(this.s.machines[id]) : 0), 0);
     return Math.round(val * 0.004 * (100 - (this.s.cond[roomId] ?? 100)));
   }
 
@@ -334,8 +461,9 @@ export class Game {
     return this.s.mode === 'solo' ? SOLO_MULT : 1 - POOL_FEE;
   }
 
-  canMine(gid: string, coinId: string): boolean {
-    return canMine(gadgetDef(gid), coinDef(coinId));
+  /** Kann eine Maschine (ID) bzw. ein Gerät mit diesen Werten den Coin minen? */
+  canMine(x: string | { hash: number; kind: Kind }, coinId: string): boolean {
+    return canMine(typeof x === 'string' ? this.mstat(x) : x, coinDef(coinId));
   }
 
   boostOn(id: string): boolean {
@@ -390,9 +518,8 @@ export class Game {
     return msg;
   }
 
-  /** Netto-Ertrag (EUR/s) eines Gadgets auf einer Münze, bei aktuellem Kurs und Upgrades. */
-  netPerSec(gid: string, coinId: string): number {
-    const g = gadgetDef(gid);
+  /** Netto-Ertrag (EUR/s) eines Geräts auf einer Münze, bei aktuellem Kurs und Upgrades. */
+  netPerSec(g: { hash: number; kind: Kind; watts: number }, coinId: string): number {
     const c = coinDef(coinId);
     const up = this.s.upgrades;
     const oc = 1 + 0.1 * (up.oc ?? 0) + (this.has('chain') ? 0.1 : 0);
@@ -425,7 +552,7 @@ export class Game {
       if (!slots) continue;
       rent += r.rent;
       const coin = coinDef(s.roomCoin[r.id] ?? DEFAULT_COIN);
-      const all = slots.filter((x): x is string => x !== null).map(gadgetDef);
+      const all = slots.filter((x): x is string => x !== null).map((id) => this.mstat(id));
       const items = all.filter((g) => canMine(g, coin)); // zu schwache Geräte stehen still
       const heat = items.reduce((a, g) => a + g.heat * cool, 0);
       const limit = r.maxHeat * limitF;
@@ -551,6 +678,71 @@ export class Game {
     }
   }
 
+  /** Hardware-Preise: Drift mit dem Kryptomarkt, Rückkehr zum Normalpreis, gelegentliche News. */
+  private updateHardware(dt: number) {
+    const bull = this.regime === 'bull' ? 1 : this.regime === 'bear' ? -1 : 0;
+    const drift: Record<HwMarket, number> = { gpu: 0.0012 * bull, asic: 0.0008 * bull, parts: 0.0003 * bull };
+    const vol: Record<HwMarket, number> = { gpu: 0.012, asic: 0.008, parts: 0.006 };
+    for (const k of ['gpu', 'asic', 'parts'] as HwMarket[]) {
+      let v = this.hw[k] * Math.exp(drift[k] * dt + (Math.random() - 0.5) * vol[k] * Math.sqrt(dt));
+      v += (1 - v) * 0.004 * dt;
+      this.hw[k] = Math.min(1.8, Math.max(0.55, v));
+    }
+    this.hwNewsTimer -= dt;
+    if (this.hwNewsTimer > 0) return;
+    this.hwNewsTimer = 90 + Math.random() * 90;
+    const r = Math.random();
+    const k: HwMarket = r < 0.5 ? 'gpu' : r < 0.75 ? 'asic' : 'parts';
+    const up = Math.random() < 0.5;
+    const pct = 8 + Math.random() * 17;
+    this.hw[k] = Math.min(1.8, Math.max(0.55, this.hw[k] * (up ? 1 + pct / 100 : 1 - pct / 100)));
+    const pool = up ? HW_NEWS[k].up : HW_NEWS[k].down;
+    const msg = `${pool[Math.floor(Math.random() * pool.length)]} – ${HW_NAMES[k]} ${up ? '+' : '−'}${Math.round(pct)} %`;
+    this.news.unshift({ msg, up, coin: 'HW', at: Date.now() });
+    if (this.news.length > 8) this.news.pop();
+    this.toast(`Hardware: ${msg}`);
+    this.fx(up ? 'news-up' : 'news-down');
+    this.emit('change');
+  }
+
+  /** Rich List: kleine Käufe/Verkäufe der fiktiven Wallets, gelegentlich Wal-Bewegungen mit Kurswirkung. */
+  private updateWorld(dt: number) {
+    this.worldTimer += dt;
+    if (this.worldTimer >= 4) {
+      this.worldTimer = 0;
+      for (let i = 0; i < 4; i++) {
+        const h = this.holders[Math.floor(Math.random() * this.holders.length)];
+        const c = COINS[Math.floor(Math.random() * COINS.length)];
+        h.hold[c.id] = Math.max(0, (h.hold[c.id] ?? 0) * (0.93 + Math.random() * 0.16));
+        h.txs++;
+      }
+    }
+    this.snapTimer += dt;
+    if (this.snapTimer >= 60) {
+      this.snapTimer = 0;
+      for (const h of this.holders) h.prev = holderValue(h, this.prices);
+    }
+    this.whaleTimer -= dt;
+    if (this.whaleTimer > 0) return;
+    this.whaleTimer = 120 + Math.random() * 120;
+    const h = this.holders[Math.floor(Math.random() * 20)];
+    const list = COINS.filter((c) => this.coinUnlocked(c) && (h.hold[c.id] ?? 0) > 0);
+    if (!list.length) return;
+    const c = list[Math.floor(Math.random() * list.length)];
+    const sell = Math.random() < 0.55;
+    const share = 0.15 + Math.random() * 0.3;
+    const amt = h.hold[c.id] * share;
+    h.hold[c.id] += sell ? -amt : amt;
+    const pct = 4 + Math.random() * 8;
+    this.prices[c.id] = Math.min(c.base * 10, Math.max(c.base * 0.1, this.prices[c.id] * (sell ? 1 - pct / 100 : 1 + pct / 100)));
+    const who = h.kind === 'person' ? h.name : `${h.name} (${shortAddr(h.addr)})`;
+    const msg = `Wal-Alarm: ${who} ${sell ? 'verschiebt' : 'kauft'} ${Math.round(amt).toLocaleString('de-DE')} ${c.id}${sell ? ' zur Börse' : ''} – ${c.id} ${sell ? '−' : '+'}${Math.round(pct)} %`;
+    this.news.unshift({ msg, up: !sell, coin: c.id, at: Date.now() });
+    if (this.news.length > 8) this.news.pop();
+    this.toast(`Börse: ${msg}`);
+    this.fx(sell ? 'news-down' : 'news-up');
+  }
+
   private updateFlyer(dt: number) {
     if (this.flyer) {
       this.flyer.t -= dt;
@@ -591,7 +783,7 @@ export class Game {
       const pool = up ? NEWS_UP : NEWS_DOWN;
       const msg = `${pool[Math.floor(Math.random() * pool.length)].replace('{c}', c.name)} – ${up ? '+' : '−'}${Math.round(pct)} %`;
       this.news.unshift({ msg, up, coin: c.id, at: Date.now() });
-      if (this.news.length > 6) this.news.pop();
+      if (this.news.length > 8) this.news.pop();
       this.toast(`Börse: ${msg}`);
       this.fx(up ? 'news-up' : 'news-down');
     }
@@ -603,9 +795,16 @@ export class Game {
       p += (c.base - p) * c.revert * dt;
       this.prices[c.id] = Math.min(c.base * 10, Math.max(c.base * 0.1, p));
     }
+    this.updateHardware(dt);
+    this.updateWorld(dt);
     this.historyTimer += dt;
     if (this.historyTimer >= 1) {
       this.historyTimer = 0;
+      for (const k of ['gpu', 'asic', 'parts'] as HwMarket[]) {
+        const h = this.hwHistory[k];
+        h.push(this.hw[k]);
+        if (h.length > 90) h.shift();
+      }
       for (const c of COINS) {
         const h = this.history[c.id];
         h.push(this.prices[c.id]);
@@ -657,7 +856,7 @@ export class Game {
         break;
       case 'sale':
         s.ev = { id: 'sale', until: s.playSec + 90, total: 90 };
-        this.toast('Hardware-Sale: alle Gadgets −30 % für 90 s!');
+        this.toast('Hardware-Sale: alle Teile und Miner −30 % für 90 s!');
         break;
       case 'crash':
         for (const c of COINS) this.prices[c.id] = Math.max(c.base * 0.1, this.prices[c.id] * 0.6);
@@ -746,52 +945,203 @@ export class Game {
 
   // ---- Aktionen ----
 
-  buyGadget(id: string) {
-    const g = gadgetDef(id);
-    if (!this.gadgetUnlocked(g)) {
-      this.toast('Noch nicht erforscht.');
-      return;
-    }
+  private hasSpace(): boolean {
     if (this.totalGadgets() >= this.maxGadgets()) {
-      this.toast('Keine freien Plätze – erweitere einen Raum oder verkaufe ein Gadget.');
-      return;
+      this.toast('Keine freien Plätze – erweitere einen Raum oder verkaufe einen Miner.');
+      return false;
     }
-    const cost = this.gadgetCost(g);
-    if (this.s.cash < cost) {
-      this.toast('Zu wenig Bargeld.');
-      return;
-    }
-    this.s.cash -= cost;
+    return true;
+  }
+
+  private newMachine(m: Omit<Machine, 'id'>): Machine {
+    const id = `m${this.s.mid++}`;
+    const mm = { ...m, id };
+    this.s.machines[id] = mm;
     this.s.bought++;
-    this.addInv(id, 1);
+    return mm;
+  }
+
+  /** Neue Maschine in den aktiven Raum stellen, falls dort ein Slot frei ist. */
+  private autoPlace(id: string) {
+    const slots = this.s.rooms[this.s.active];
+    const idx = slots ? slots.indexOf(null) : -1;
+    if (idx >= 0) slots[idx] = id;
+  }
+
+  private addPart(id: string, n: number) {
+    const v = (this.s.parts[id] ?? 0) + n;
+    if (v <= 0) delete this.s.parts[id];
+    else this.s.parts[id] = v;
+  }
+
+  private noteBargain(market: HwMarket) {
+    if (this.hw[market] < 0.85) this.s.stats.bargains++;
+  }
+
+  buyPart(id: string) {
+    const p = partDef(id);
+    if (!this.unlocked(p)) { this.toast('Noch nicht erforscht.'); return; }
+    const cost = this.partPrice(id);
+    if (this.s.cash < cost) { this.toast('Zu wenig Bargeld.'); return; }
+    this.s.cash -= cost;
+    this.addPart(id, 1);
+    this.noteBargain(CATS[p.cat].market);
     this.afterChange();
   }
 
-  sellGadget(id: string) {
-    if ((this.s.inv[id] ?? 0) < 1) {
-      this.toast('Kein Gadget im Lager zum Verkaufen.');
-      return;
-    }
-    this.s.cash += Math.round(gadgetDef(id).cost * 0.5);
-    this.addInv(id, -1);
+  sellPart(id: string) {
+    if ((this.s.parts[id] ?? 0) < 1) { this.toast('Kein Teil im Lager.'); return; }
+    this.s.cash += this.partSellValue(id);
+    this.addPart(id, -1);
     this.afterChange();
   }
 
-  private addInv(id: string, n: number) {
-    const v = (this.s.inv[id] ?? 0) + n;
-    if (v <= 0) delete this.s.inv[id];
-    else this.s.inv[id] = v;
+  buyPrebuilt(id: string) {
+    const p = prebuiltDef(id);
+    if (!this.unlocked(p)) { this.toast('Noch nicht erforscht.'); return; }
+    if (!this.hasSpace()) return;
+    const cost = this.prePrice(id);
+    if (this.s.cash < cost) { this.toast('Zu wenig Bargeld.'); return; }
+    this.s.cash -= cost;
+    this.noteBargain('asic');
+    const m = this.newMachine({ name: `${p.brand} ${p.name}`, pre: id });
+    this.autoPlace(m.id);
+    this.afterChange();
   }
 
-  private bestInInv(): string | null {
-    for (let i = GADGETS.length - 1; i >= 0; i--) {
-      const id = GADGETS[i].id;
-      if ((this.s.inv[id] ?? 0) > 0) return id;
-    }
-    return null;
+  /** Miner verkaufen (nur aus dem Lager, nicht aufgestellt). */
+  sellMachine(id: string) {
+    const m = this.s.machines[id];
+    if (!m) return;
+    if (this.roomOf(id)) { this.toast('Kein Verkauf möglich: Miner steht noch im Raum.'); return; }
+    this.s.cash += this.machineSellValue(m);
+    delete this.s.machines[id];
+    this.afterChange();
   }
 
-  placeItem() {
+  /** Selbstgebauten Miner zerlegen: alle Teile zurück ins Lager. */
+  dismantle(id: string, toDraft = false) {
+    const m = this.s.machines[id];
+    if (!m?.build) return;
+    const r = this.roomOf(id);
+    if (r) this.s.rooms[r] = this.s.rooms[r].map((x) => (x === id ? null : x));
+    for (const p of buildPartList(m.build)) this.addPart(p, 1);
+    if (toDraft) this.s.draft = cloneBuild(m.build);
+    delete this.s.machines[id];
+    this.afterChange();
+  }
+
+  // ---- Werkstatt ----
+
+  setDraftPart(cat: PartCat, id: string) {
+    const d = this.s.draft;
+    if (d.parts[cat] === id && !CATS[cat].req) delete d.parts[cat];
+    else d.parts[cat] = id;
+    this.afterChange();
+  }
+
+  clearDraftPart(cat: PartCat) {
+    delete this.s.draft.parts[cat];
+    this.afterChange();
+  }
+
+  addDraftGpu(id: string) {
+    const st = buildStats(this.s.draft);
+    if (st.maxGpu && this.s.draft.gpus.length >= st.maxGpu) { this.toast(`Kein PCIe-Slot frei (max. ${st.maxGpu}).`); return; }
+    if (!this.s.draft.parts.case || !this.s.draft.parts.board) { this.toast('Kein Gehäuse oder Mainboard gewählt.'); return; }
+    this.s.draft.gpus.push(id);
+    this.afterChange();
+  }
+
+  removeDraftGpu(idx: number) {
+    this.s.draft.gpus.splice(idx, 1);
+    this.afterChange();
+  }
+
+  /** Grafikkarten der Konfiguration bis zum Maximum mit diesem Modell auffüllen. */
+  fillDraftGpu(id: string) {
+    const st = buildStats(this.s.draft);
+    while (this.s.draft.gpus.length < st.maxGpu) this.s.draft.gpus.push(id);
+    this.afterChange();
+  }
+
+  clearDraft() {
+    this.s.draft = emptyBuild();
+    this.afterChange();
+  }
+
+  /** Konfiguration zusammenbauen: Lagerteile verwenden, fehlende Teile automatisch kaufen. */
+  buildDraft(name?: string): boolean {
+    const b = this.s.draft;
+    const st = buildStats(b);
+    if (st.problems.length) { this.toast(`Kein Zusammenbau möglich: ${st.problems[0]}.`); return false; }
+    for (const id of buildPartList(b)) if (!this.unlocked(partDef(id))) { this.toast('Noch nicht erforscht.'); return false; }
+    if (!this.hasSpace()) return false;
+    const { cost, missing } = this.missingCost(b);
+    if (this.s.cash < cost) { this.toast(`Zu wenig Bargeld: fehlende Teile kosten ${Math.round(cost).toLocaleString('de-DE')} €.`); return false; }
+    this.s.cash -= cost;
+    for (const id of missing) this.addPart(id, 1);
+    if (missing.some((id) => partDef(id).cat === 'gpu')) this.noteBargain('gpu');
+    for (const id of buildPartList(b)) this.addPart(id, -1);
+    const m = this.newMachine({ name: name?.trim() || st.name, build: cloneBuild(b) });
+    this.s.stats.built++;
+    this.autoPlace(m.id);
+    this.toast(`Zusammengebaut: ${m.name}`);
+    this.fx('repair');
+    this.afterChange();
+    return true;
+  }
+
+  saveBlueprint(name: string) {
+    const st = buildStats(this.s.draft);
+    if (st.problems.length) { this.toast(`Kein gültiger Blueprint: ${st.problems[0]}.`); return; }
+    if (this.s.blueprints.length >= 12) { this.toast('Kein Platz: maximal 12 Blueprints.'); return; }
+    this.s.blueprints.push({ id: `b${Date.now().toString(36)}`, name: name.trim() || st.name, build: cloneBuild(this.s.draft) });
+    this.toast('Blueprint gespeichert.');
+    this.afterChange();
+  }
+
+  loadBlueprint(id: string) {
+    const bp = this.s.blueprints.find((x) => x.id === id);
+    if (!bp) return;
+    this.s.draft = cloneBuild(bp.build);
+    this.afterChange();
+  }
+
+  buildBlueprint(id: string) {
+    const bp = this.s.blueprints.find((x) => x.id === id);
+    if (!bp) return;
+    const keep = this.s.draft;
+    this.s.draft = cloneBuild(bp.build);
+    const ok = this.buildDraft(bp.name);
+    this.s.draft = keep;
+    if (!ok) this.afterChange();
+  }
+
+  deleteBlueprint(id: string) {
+    this.s.blueprints = this.s.blueprints.filter((x) => x.id !== id);
+    this.afterChange();
+  }
+
+  /** Konfiguration einer bestehenden Maschine als Blueprint übernehmen. */
+  blueprintFrom(id: string) {
+    const m = this.s.machines[id];
+    if (!m?.build) return;
+    const keep = this.s.draft;
+    this.s.draft = cloneBuild(m.build);
+    this.saveBlueprint(m.name);
+    this.s.draft = keep;
+    this.afterChange();
+  }
+
+  // ---- Aufstellen ----
+
+  private bestUnplaced(): string | null {
+    const list = this.unplaced().sort((a, b) => this.mstat(b.id).hash - this.mstat(a.id).hash);
+    return list[0]?.id ?? null;
+  }
+
+  placeItem(id?: string) {
     const slots = this.s.rooms[this.s.active];
     if (!slots) return;
     const idx = slots.indexOf(null);
@@ -799,33 +1149,37 @@ export class Game {
       this.toast('Raum ist voll.');
       return;
     }
-    const id = this.bestInInv();
-    if (!id) {
-      this.toast('Kein Gadget im Inventar.');
+    const mid = id ?? this.bestUnplaced();
+    if (!mid || this.roomOf(mid)) {
+      this.toast('Kein Miner im Lager.');
       return;
     }
-    slots[idx] = id;
-    this.addInv(id, -1);
+    slots[idx] = mid;
+    this.afterChange();
+  }
+
+  /** Miner aus dem Raum ins Lager nehmen. */
+  unplace(id: string) {
+    const r = this.roomOf(id);
+    if (!r) return;
+    this.s.rooms[r] = this.s.rooms[r].map((x) => (x === id ? null : x));
     this.afterChange();
   }
 
   toggleSlot(idx: number) {
     const slots = this.s.rooms[this.s.active];
     if (!slots) return;
-    const cur = slots[idx];
-    if (cur) {
+    if (slots[idx]) {
       slots[idx] = null;
-      this.addInv(cur, 1);
       this.afterChange();
       return;
     }
-    const id = this.bestInInv();
+    const id = this.bestUnplaced();
     if (!id) {
-      this.toast('Kein Gadget im Inventar.');
+      this.toast('Kein Miner im Lager. Baue einen in der Werkstatt.');
       return;
     }
     slots[idx] = id;
-    this.addInv(id, -1);
     this.afterChange();
   }
 
@@ -856,7 +1210,7 @@ export class Game {
     const c = coinDef(coinId);
     if (!this.s.rooms[roomId] || !this.coinUnlocked(c)) return;
     this.s.roomCoin[roomId] = coinId;
-    const items = (this.s.rooms[roomId] ?? []).filter((x): x is string => !!x).map(gadgetDef);
+    const items = (this.s.rooms[roomId] ?? []).filter((x): x is string => !!x).map((id) => this.mstat(id));
     const weak = items.filter((g) => !canMine(g, c)).length;
     if (weak) this.toast(`Achtung: ${weak} Gerät(e) schaffen ${c.id} nicht (min. ${c.minHash} H/s) und stehen still.`);
     this.afterChange();
@@ -1032,6 +1386,8 @@ export class Game {
       streak: this.s.streak,
       tutorial: true,
       mission: this.s.mission,
+      blueprints: this.s.blueprints,
+      addr: this.s.addr,
     };
     this.s = { ...this.fresh(), ...keep };
     this.fx('prestige');
@@ -1049,13 +1405,15 @@ export class Game {
   // ---- Persistenz ----
 
   private fresh(): SaveData {
+    const starter: Machine = { id: 'm1', name: 'Alter Familien-PC', build: cloneBuild(STARTER_PC) };
     return {
-      v: 2, boosts: {}, cash: 300, wallet: {}, staked: {}, soldEur: 0, minedTotal: 0, bought: 0, playSec: 0,
-      inv: {}, rooms: { kid: [null, null] }, cond: { kid: 100 }, roomCoin: {}, upgrades: {}, staff: {},
+      v: 3, boosts: {}, cash: 350, wallet: {}, staked: {}, soldEur: 0, minedTotal: 0, bought: 0, playSec: 0,
+      machines: { m1: starter }, parts: {}, blueprints: [], draft: emptyBuild(), mid: 2, addr: makeAddr(),
+      rooms: { kid: ['m1', null] }, cond: { kid: 100 }, roomCoin: { kid: 'MON' }, upgrades: {}, staff: {},
       research: [], researching: null, debt: 0, insured: false, mode: 'pool', autoSell: { on: false, min: 100 },
       mission: 0, ach: [], overheated: false, ev: null, prestige: { points: 0, resets: 0, lifetime: 0 },
       streak: { last: '', count: 0 }, tutorial: false,
-      stats: { events: 0, outages: 0, hacked: 0, blocks: 0, repairs: 0, loans: 0, repaid: 0, powerSpent: 0, rentPaid: 0, interestPaid: 0, clicks: 0, salaryPaid: 0, bonuses: 0 },
+      stats: { events: 0, outages: 0, hacked: 0, blocks: 0, repairs: 0, loans: 0, repaid: 0, powerSpent: 0, rentPaid: 0, interestPaid: 0, clicks: 0, salaryPaid: 0, bonuses: 0, built: 0, bargains: 0 },
       netHistory: [], savedAt: Date.now(), active: 'kid',
     };
   }
@@ -1070,31 +1428,62 @@ export class Game {
     }
   }
 
+  /** Nach einer Migration von v1/v2: Missionsindex neu bestimmen (ohne erneute Belohnung). */
+  private remapMission = false;
+
   private migrate(d: Record<string, unknown>): SaveData | null {
     if (!d || typeof d !== 'object') return null;
     const base = this.fresh();
-    if (d.v === 1) {
-      const o = d as unknown as { cash: number; coins: number; sold: number; mined: number; bought: number; playSec: number; inv: Record<string, number>; rooms: Record<string, Slots>; upgrades: Record<string, number>; mission: number; ach: string[]; overheated: boolean; savedAt: number; active: string };
-      return {
-        ...base, cash: o.cash, wallet: { BIT: o.coins }, soldEur: o.sold * 40, minedTotal: o.mined, bought: o.bought, playSec: o.playSec,
+    let src = d as Record<string, unknown>;
+    if (src.v === 1) {
+      const o = src as unknown as { cash: number; coins: number; sold: number; mined: number; bought: number; playSec: number; inv: Record<string, number>; rooms: Record<string, Slots>; upgrades: Record<string, number>; ach: string[]; overheated: boolean; savedAt: number; active: string };
+      src = {
+        cash: o.cash, wallet: { BIT: o.coins }, soldEur: o.sold * 40, minedTotal: o.mined, bought: o.bought, playSec: o.playSec,
         inv: o.inv, rooms: o.rooms, cond: Object.fromEntries(Object.keys(o.rooms).map((k) => [k, 100])), upgrades: o.upgrades,
-        mission: Math.min(o.mission, MISSIONS.length), ach: o.ach, overheated: o.overheated, savedAt: o.savedAt, active: o.active, tutorial: true,
+        ach: o.ach, overheated: o.overheated, savedAt: o.savedAt, active: o.active, tutorial: true, v: 2,
       };
     }
-    if (d.v !== 2) return null;
-    const m = { ...base, ...(d as unknown as SaveData) };
+    if (src.v === 2) {
+      // Alte Gadgets in Maschinen umwandeln
+      const machines: Record<string, Machine> = {};
+      let mid = 1;
+      const make = (old: string): string | null => {
+        const id = `m${mid++}`;
+        if (old === 'gpu') machines[id] = { id, name: 'GPU-PC (Altbestand)', build: { parts: { ...STARTER_PC.parts }, gpus: ['g_k340'] } };
+        else if (PREBUILT.some((p) => p.id === old)) { const p = prebuiltDef(old); machines[id] = { id, name: `${p.brand} ${p.name}`, pre: old }; }
+        else return null;
+        return id;
+      };
+      const rooms = (src.rooms ?? {}) as Record<string, Slots>;
+      const newRooms: Record<string, Slots> = {};
+      for (const r in rooms) newRooms[r] = rooms[r].map((x) => (x ? make(x) : null));
+      for (const [old, n] of Object.entries((src.inv ?? {}) as Record<string, number>)) for (let i = 0; i < n; i++) make(old);
+      src = { ...src, v: 3, machines, rooms: newRooms, mid, parts: {}, blueprints: [], draft: emptyBuild(), addr: makeAddr() };
+      delete src.inv;
+      this.remapMission = true;
+    }
+    if (src.v !== 3) return null;
+    const m = { ...base, ...(src as unknown as SaveData) };
     m.stats = { ...base.stats, ...m.stats };
     m.prestige = { ...base.prestige, ...m.prestige };
     m.autoSell = { ...base.autoSell, ...m.autoSell };
+    m.draft = { parts: { ...(m.draft?.parts ?? {}) }, gpus: [...(m.draft?.gpus ?? [])] };
+    // Unbekannte Teile (z. B. aus älteren Versionen) entfernen
+    const known = (id: string) => PARTS.some((p) => p.id === id);
+    for (const id of Object.keys(m.parts)) if (!known(id)) delete m.parts[id];
     for (const r of ROOMS) {
       const slots = m.rooms[r.id];
       if (slots && slots.length !== r.spots.length) m.rooms[r.id] = Array.from({ length: r.spots.length }, (_, i) => slots[i] ?? null);
+      if (slots) m.rooms[r.id] = m.rooms[r.id].map((x) => (x && m.machines[x] ? x : null));
     }
-    // Coin-Mindesthashrate: Räume, deren Geräte den gewählten Coin nicht schaffen, auf Etra umstellen
+    // Coin-Mindesthashrate: Räume, deren Geräte den gewählten Coin nicht schaffen, auf einen passenden Coin umstellen
     for (const r of ROOMS) {
-      const items = (m.rooms[r.id] ?? []).filter((x): x is string => !!x).map(gadgetDef);
+      const items = (m.rooms[r.id] ?? []).filter((x): x is string => !!x).map((id) => machineStats(m.machines[id]));
       const c = coinDef(m.roomCoin[r.id] ?? DEFAULT_COIN);
-      if (items.length && !items.some((g) => canMine(g, c))) m.roomCoin[r.id] = DEFAULT_COIN;
+      if (items.length && !items.some((g) => canMine(g, c))) {
+        const fit = [DEFAULT_COIN, 'MON', 'BIT'].find((id) => items.some((g) => canMine(g, coinDef(id))));
+        m.roomCoin[r.id] = fit ?? DEFAULT_COIN;
+      }
     }
     if (!m.rooms[m.active]) m.active = 'kid';
     m.ev = null;

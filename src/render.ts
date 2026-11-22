@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { game } from './game';
-import { DEFAULT_COIN, gadgetDef, roomDef } from './config';
+import { DEFAULT_COIN, roomDef } from './config';
+import { partDef } from './hardware';
 import type { RoomDef } from './config';
 import { sfx } from './audio';
 import { DPR } from './env';
@@ -168,7 +169,7 @@ function drawDeco(g: G, d: Deco, led: LedFn) {
 }
 
 interface Led { x: number; y: number; c: number; phase: number; }
-interface Fan { x: number; y: number; hot: boolean; }
+interface Fan { x: number; y: number; hot: boolean; s?: number; }
 interface Hit { x: number; y: number; idx: number; poly: Pt[]; }
 interface Part { x: number; y: number; vx: number; vy: number; life: number; max: number; c: number; r: number; ring?: boolean; }
 
@@ -255,8 +256,8 @@ export class MainScene extends Phaser.Scene {
     this.fanAngle += dt * rate;
     for (const f of this.fans) {
       const a = this.fanAngle * (f.hot ? 1.7 : 1);
-      const rx = 17 * zoom;
-      const ry = 8.5 * zoom;
+      const rx = 17 * zoom * (f.s ?? 1);
+      const ry = 8.5 * zoom * (f.s ?? 1);
       g.lineStyle(2.4 * zoom, f.hot ? 0xff9a6b : 0xb8c4e0, powered ? 0.85 : 0.35);
       for (let k = 0; k < 3; k++) {
         const ang = a + (k * Math.PI * 2) / 3;
@@ -496,19 +497,90 @@ export class MainScene extends Phaser.Scene {
   private drawSlot(g: G, u: number, v: number, idx: number, id: string | null, hot: boolean) {
     box(g, u, v, 1.2, 1.2, 3, 0x262b38);
     const poly = [P(u, v, 3), P(u + 1.2, v, 3), P(u + 1.2, v + 1.2, 3), P(u, v + 1.2, 3)];
-    if (id) {
-      const gd = gadgetDef(id);
+    if (id && game.s.machines[id]) {
+      const st = game.mstat(id);
       const idle = !game.canMine(id, game.s.roomCoin[game.s.active] ?? DEFAULT_COIN);
-      box(g, u + 0.15, v + 0.15, 0.9, 0.9, gd.size, gd.color, 3, 3);
-      const f = P(u + 0.6, v + 0.6, 3 + gd.size);
-      g.fillStyle(0x10131c, 1);
-      g.fillEllipse(f.x, f.y, 40 * zoom, 20 * zoom);
-      g.lineStyle(1.5 * DPR, shade(gd.color, 1.3), 0.8);
-      g.strokeEllipse(f.x, f.y, 40 * zoom, 20 * zoom);
-      if (!idle) this.fans.push({ x: f.x, y: f.y, hot });
-      for (let k = 0; k < 2; k++) {
-        const led = P(u + 1.05, v + 0.3 + k * 0.45, 3 + gd.size * 0.55);
-        this.ledPts.push({ x: led.x, y: led.y, c: idle ? 0x3a3f4f : hot ? 0xff6a3d : gd.ledColor, phase: idx * 1.3 + k });
+      const led = idle ? 0x3a3f4f : hot ? 0xff6a3d : st.ledColor;
+      const fan = (x: number, y: number, sc: number) => {
+        g.fillStyle(0x10131c, 1);
+        g.fillEllipse(x, y, 40 * zoom * sc, 20 * zoom * sc);
+        g.lineStyle(1.2 * DPR, shade(st.color, 1.3), 0.8);
+        g.strokeEllipse(x, y, 40 * zoom * sc, 20 * zoom * sc);
+        if (!idle) this.fans.push({ x, y, hot, s: sc });
+      };
+      const addLed = (p: Pt, k: number) => this.ledPts.push({ x: p.x, y: p.y, c: led, phase: idx * 1.3 + k });
+      switch (st.model) {
+        case 'tower': {
+          const H = 44;
+          box(g, u + 0.35, v + 0.2, 0.5, 0.8, H, st.color, 3, 0);
+          // Glasseite mit Grafikkarten
+          const z0 = 3;
+          const win = [P(u + 0.4, v + 1.0, z0 + 6), P(u + 0.8, v + 1.0, z0 + 6), P(u + 0.8, v + 1.0, z0 + H - 6), P(u + 0.4, v + 1.0, z0 + H - 6)];
+          g.fillStyle(0x0b0e16, 0.9);
+          g.fillPoints(win, true);
+          g.fillStyle(led, idle ? 0.05 : 0.22);
+          g.fillPoints(win, true);
+          st.gpus.forEach((gid, k) => {
+            const z = z0 + 12 + k * 10;
+            g.lineStyle(4 * zoom, partDef(gid).color === 0x111318 ? 0x3a3f4f : partDef(gid).color, 1);
+            line(g, P(u + 0.44, v + 1.0, z), P(u + 0.76, v + 1.0, z));
+          });
+          g.lineStyle(1 * DPR, 0xffffff, 0.25);
+          g.strokePoints(win, true);
+          fan(P(u + 0.6, v + 0.6, z0 + H).x, P(u + 0.6, v + 0.6, z0 + H).y, 0.42);
+          addLed(P(u + 0.85, v + 0.35, z0 + H - 8), 0);
+          addLed(P(u + 0.85, v + 0.35, z0 + 8), 1);
+          break;
+        }
+        case 'rig': {
+          const n = Math.max(1, st.gpus.length);
+          const fc = st.color;
+          box(g, u + 0.08, v + 0.08, 1.04, 1.04, 4, shade(fc, 0.6), 3);
+          // hintere Pfosten
+          box(g, u + 0.08, v + 0.08, 0.07, 0.07, 30, fc, 7);
+          box(g, u + 1.05, v + 0.08, 0.07, 0.07, 30, fc, 7);
+          box(g, u + 0.08, v + 1.05, 0.07, 0.07, 30, fc, 7);
+          // Mainboard hinten
+          box(g, u + 0.2, v + 0.12, 0.8, 0.12, 16, 0x2f5b6b, 7);
+          const w = 0.88 / n;
+          st.gpus.forEach((gid, k) => {
+            const cu = u + 0.16 + k * w;
+            const col = partDef(gid).color;
+            box(g, cu, v + 0.32, w * 0.62, 0.62, 20, col === 0x111318 ? 0x2a2f38 : col, 9);
+            if (n <= 6 || k % 2 === 0) {
+              const p = P(cu + w * 0.31, v + 0.63, 29);
+              fan(p.x, p.y, Math.min(0.3, 0.9 / n + 0.08));
+            }
+            addLed(P(cu + w * 0.31, v + 0.94, 26), k);
+          });
+          // vorderer Pfosten und obere Schiene
+          box(g, u + 1.05, v + 1.05, 0.07, 0.07, 30, fc, 7);
+          box(g, u + 0.08, v + 1.05, 1.04, 0.07, 2, fc, 37);
+          box(g, u + 1.05, v + 0.08, 0.07, 1.04, 2, fc, 37);
+          break;
+        }
+        case 'asic': {
+          const H = st.hash >= 2000 ? 50 : st.hash >= 800 ? 46 : 34;
+          box(g, u + 0.15, v + 0.15, 0.9, 0.9, H, st.color, 3, 3);
+          const f = P(u + 0.6, v + 0.6, 3 + H);
+          fan(f.x, f.y, 1);
+          if (st.hash >= 2000) {
+            g.lineStyle(3 * zoom, 0x7ab8ff, 0.9);
+            line(g, P(u + 1.05, v + 0.3, 10), P(u + 1.05, v + 0.3, H - 4));
+            line(g, P(u + 1.05, v + 0.8, 10), P(u + 1.05, v + 0.8, H - 4));
+          }
+          for (let k = 0; k < 2; k++) addLed(P(u + 1.05, v + 0.3 + k * 0.45, 3 + H * 0.55), k);
+          break;
+        }
+        default: {
+          const H = st.model === 'fusion' ? 64 : 56;
+          box(g, u + 0.15, v + 0.15, 0.9, 0.9, H, st.color, 3, 3);
+          const f = P(u + 0.6, v + 0.6, 3 + H);
+          g.fillStyle(led, idle ? 0.1 : 0.35);
+          g.fillEllipse(f.x, f.y, 46 * zoom, 23 * zoom);
+          fan(f.x, f.y, 0.8);
+          for (let k = 0; k < 3; k++) addLed(P(u + 1.05, v + 0.25 + k * 0.3, 3 + H * 0.6), k);
+        }
       }
     }
     const c = P(u + 0.6, v + 0.6);

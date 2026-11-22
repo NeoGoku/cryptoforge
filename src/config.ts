@@ -1,26 +1,4 @@
-export type Kind = 'gpu' | 'asic' | 'quantum' | 'fusion';
-
-export interface GadgetDef {
-  id: string;
-  name: string;
-  kind: Kind;
-  hash: number;   // H/s
-  watts: number;  // Verbrauch
-  heat: number;   // Hitze je Gadget
-  cost: number;   // EUR
-  size: number;   // Gehäusehöhe (Render)
-  color: number;
-  ledColor: number;
-  unlock?: string; // Forschungs-ID
-}
-
-export const GADGETS: GadgetDef[] = [
-  { id: 'gpu', name: 'GPU-Rig Nova', kind: 'gpu', hash: 25, watts: 350, heat: 30, cost: 180, size: 22, color: 0x8c90c0, ledColor: 0x4fd1c5 },
-  { id: 'asic', name: 'ASIC Titan S9', kind: 'asic', hash: 140, watts: 1100, heat: 110, cost: 1200, size: 34, color: 0xb8862b, ledColor: 0xffc857 },
-  { id: 'pro', name: 'ASIC Titan X', kind: 'asic', hash: 720, watts: 3200, heat: 260, cost: 7500, size: 48, color: 0xb0584c, ledColor: 0xff6a3d },
-  { id: 'qpu', name: 'Quantum Q1', kind: 'quantum', hash: 3600, watts: 9000, heat: 520, cost: 40000, size: 56, color: 0x3a8fb8, ledColor: 0x7af5ff, unlock: 'quantum' },
-  { id: 'fusion', name: 'Fusion Core', kind: 'fusion', hash: 18000, watts: 22000, heat: 900, cost: 200000, size: 64, color: 0xb04a8c, ledColor: 0xff7ac8, unlock: 'fusion' },
-];
+export type Kind = 'cpu' | 'gpu' | 'asic' | 'quantum' | 'fusion';
 
 export interface CoinDef {
   id: string;
@@ -30,25 +8,26 @@ export interface CoinDef {
   vol: number;       // Volatilität
   revert: number;    // Rückkehr zum Basiskurs
   perHash: number;   // Coins je Hash und Sekunde
-  mult: Record<Kind, number>; // Algorithmus-Faktor je Gadget-Typ
-  minHash: number;   // Mindest-Hashrate je Gadget, um diesen Coin zu minen
+  mult: Record<Kind, number>; // Algorithmus-Faktor je Gerätetyp
+  minHash: number;   // Mindest-Hashrate je Gerät, um diesen Coin zu minen
   desc: string;
   unlock?: string;
 }
 
 export const COINS: CoinDef[] = [
-  { id: 'ETRA', name: 'Etra', color: '#8c7bff', base: 12, vol: 0.06, revert: 0.02, perHash: 0.0022, minHash: 20, mult: { gpu: 1.35, asic: 0.6, quantum: 0.9, fusion: 0.9 }, desc: 'GPU-Algorithmus. Ideal für den Einstieg.' },
-  { id: 'NOVA', name: 'Nova', color: '#ff6aa8', base: 0.8, vol: 0.14, revert: 0.008, perHash: 0.03, minHash: 0, mult: { gpu: 1, asic: 1, quantum: 1.2, fusion: 1.2 }, desc: 'Spekulativer Meme-Coin. Extreme Ausschläge.', unlock: 'market' },
-  { id: 'BIT', name: 'BitForge', color: '#ffc857', base: 40, vol: 0.04, revert: 0.02, perHash: 0.00072, minHash: 100, mult: { gpu: 0.8, asic: 1.1, quantum: 1.1, fusion: 1.1 }, desc: 'Solide Leitwährung. Braucht ASIC-Leistung.' },
-  { id: 'LUX', name: 'Luxar', color: '#7ee787', base: 320, vol: 0.05, revert: 0.02, perHash: 0.000106, minHash: 500, mult: { gpu: 1, asic: 1.15, quantum: 1, fusion: 1 }, desc: 'Premium-Coin für Hochleistungs-ASICs.' },
-  { id: 'QBT', name: 'Qubit', color: '#7af5ff', base: 2600, vol: 0.07, revert: 0.015, perHash: 0.0000162, minHash: 3000, mult: { gpu: 1, asic: 1, quantum: 1.3, fusion: 1.05 }, desc: 'Quanten-Algorithmus. Nur für Quantenrechner.', unlock: 'quantum' },
-  { id: 'HEL', name: 'Helion', color: '#ff9f43', base: 21000, vol: 0.06, revert: 0.015, perHash: 0.00000238, minHash: 15000, mult: { gpu: 1, asic: 1, quantum: 1, fusion: 1.3 }, desc: 'Fusions-Coin. Höchster Ertrag je Hash.', unlock: 'fusion' },
+  { id: 'MON', name: 'Mondo', color: '#9ad0ff', base: 1.5, vol: 0.05, revert: 0.02, perHash: 0.02, minHash: 0, mult: { cpu: 1.6, gpu: 0.9, asic: 0, quantum: 0.8, fusion: 0.8 }, desc: 'CPU-Coin. Läuft auf jedem PC, ASICs können ihn nicht minen.' },
+  { id: 'ETRA', name: 'Etra', color: '#8c7bff', base: 12, vol: 0.06, revert: 0.02, perHash: 0.0022, minHash: 20, mult: { cpu: 0.3, gpu: 1.35, asic: 0.6, quantum: 0.9, fusion: 0.9 }, desc: 'GPU-Algorithmus. Ideal für den Einstieg.' },
+  { id: 'NOVA', name: 'Nova', color: '#ff6aa8', base: 0.8, vol: 0.14, revert: 0.008, perHash: 0.03, minHash: 0, mult: { cpu: 1, gpu: 1, asic: 1, quantum: 1.2, fusion: 1.2 }, desc: 'Spekulativer Meme-Coin. Extreme Ausschläge.', unlock: 'market' },
+  { id: 'BIT', name: 'BitForge', color: '#ffc857', base: 40, vol: 0.04, revert: 0.02, perHash: 0.00072, minHash: 100, mult: { cpu: 0, gpu: 0.8, asic: 1.1, quantum: 1.1, fusion: 1.1 }, desc: 'Solide Leitwährung. Braucht ASIC-Leistung.' },
+  { id: 'LUX', name: 'Luxar', color: '#7ee787', base: 320, vol: 0.05, revert: 0.02, perHash: 0.000106, minHash: 500, mult: { cpu: 0, gpu: 1, asic: 1.15, quantum: 1, fusion: 1 }, desc: 'Premium-Coin für Hochleistungs-ASICs.' },
+  { id: 'QBT', name: 'Qubit', color: '#7af5ff', base: 2600, vol: 0.07, revert: 0.015, perHash: 0.0000162, minHash: 3000, mult: { cpu: 0, gpu: 1, asic: 1, quantum: 1.3, fusion: 1.05 }, desc: 'Quanten-Algorithmus. Nur für Quantenrechner.', unlock: 'quantum' },
+  { id: 'HEL', name: 'Helion', color: '#ff9f43', base: 21000, vol: 0.06, revert: 0.015, perHash: 0.00000238, minHash: 15000, mult: { cpu: 0, gpu: 1, asic: 1, quantum: 1, fusion: 1.3 }, desc: 'Fusions-Coin. Höchster Ertrag je Hash.', unlock: 'fusion' },
 ];
 
 export const DEFAULT_COIN = 'ETRA';
 
-/** Kann dieses Gadget den Coin minen (genug Hashrate je Gerät)? */
-export const canMine = (g: GadgetDef, c: CoinDef): boolean => g.hash >= c.minHash && c.mult[g.kind] > 0;
+/** Kann dieses Gerät den Coin minen (genug Hashrate, passender Algorithmus)? */
+export const canMine = (g: { hash: number; kind: Kind }, c: CoinDef): boolean => g.hash >= c.minHash && c.mult[g.kind] > 0;
 
 export interface RoomDef {
   id: string;
@@ -122,14 +101,13 @@ export const TECHS: TechDef[] = [
   { id: 'market', name: 'Marktanalyse', desc: 'Schaltet die Münze Nova frei', cost: 2500, secs: 60 },
   { id: 'auto', name: 'Auto-Verkauf', desc: 'Verkauft Coins automatisch ab einem Schwellwert', cost: 3500, secs: 60 },
   { id: 'chain', name: 'Block-Optimierung', desc: 'Hash +10 %', cost: 8000, secs: 90 },
-  { id: 'immersion', name: 'Immersionskühlung', desc: 'Hitze −20 %', cost: 6000, secs: 90, req: 'eff' },
+  { id: 'immersion', name: 'Immersionskühlung', desc: 'Hitze −20 %, schaltet den Immersion Tank frei', cost: 6000, secs: 90, req: 'eff' },
   { id: 'quantum', name: 'Quantum-Hardware', desc: 'Schaltet Quantum Q1 frei', cost: 25000, secs: 180, req: 'immersion' },
   { id: 'fusion', name: 'Fusionskern', desc: 'Schaltet Fusion Core frei', cost: 120000, secs: 300, req: 'quantum' },
 ];
 
 export const LOANS = [500, 2500, 10000, 50000];
 
-export const gadgetDef = (id: string): GadgetDef => GADGETS.find((g) => g.id === id)!;
 export const roomDef = (id: string): RoomDef => ROOMS.find((r) => r.id === id)!;
 export const upgradeDef = (id: string): UpgradeDef => UPGRADES.find((u) => u.id === id)!;
 export const coinDef = (id: string): CoinDef => COINS.find((c) => c.id === id)!;
