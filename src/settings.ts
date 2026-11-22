@@ -3,10 +3,11 @@ export interface Settings {
   sfx: number;     // 0..1
   quality: 'high' | 'low';
   shake: boolean;
+  scene: boolean;  // Raum-Ansicht sichtbar
 }
 
 const KEY = 'cf.settings';
-const defaults: Settings = { music: 0.5, sfx: 0.8, quality: 'high', shake: true };
+const defaults: Settings = { music: 0.5, sfx: 0.8, quality: 'high', shake: true, scene: true };
 
 function load(): Settings {
   try {

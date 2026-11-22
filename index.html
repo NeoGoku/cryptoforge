@@ -130,6 +130,26 @@
   .rich.me { background: rgba(255,200,87,.12); border-color: var(--gold); }
   .rich .rk { width: 30px; color: var(--mut); font-weight: 700; font-size: 11px; }
   .rich .av { font-size: 18px; }
+  .clicker { display: flex; align-items: center; gap: 8px; flex: none; }
+  #mineBtn { display: flex; flex-direction: column; align-items: center; gap: 0; padding: 6px 12px; min-width: 76px; border-radius: 12px; background: linear-gradient(180deg, #ffd479, #e0a530); color: #2a1a00; border: 0; box-shadow: 0 3px 0 #9a6f10, 0 6px 14px rgba(255,200,87,.25); touch-action: manipulation; user-select: none; }
+  #mineBtn span { font-size: 18px; line-height: 1; }
+  #mineBtn b { font-size: 12px; }
+  #mineBtn small { font-size: 10px; opacity: .8; white-space: nowrap; }
+  #mineBtn:active { transform: translateY(2px) scale(.97); box-shadow: 0 1px 0 #9a6f10; }
+  #mineBtn.hot { animation: btnpulse .5s ease-in-out infinite; }
+  .odm { width: 130px; }
+  .odm .mhead { font-size: 10.5px; margin-bottom: 3px; }
+  .odm .track { height: 7px; }
+  #odFill { background: linear-gradient(90deg, #ffc857, #ff6a3d); }
+  #odFill.on { animation: hotblink .4s infinite alternate; }
+  body.noscene #game, body.noscene #vig { visibility: hidden; }
+  body.noscene #dock { right: auto; width: 300px; }
+  body.noscene #panel { left: 320px; width: auto; }
+  body.noscene .bar { flex-wrap: wrap; }
+  body.noscene .sell, body.noscene .clicker { width: 100%; }
+  body.noscene .odm { flex: 1; }
+  body.noscene .roomrow, body.noscene .coinrow { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+  body.noscene .roomrow .chip { white-space: nowrap; }
   #boosts { display: flex; gap: 6px; flex-wrap: wrap; }
   .boost { padding: 6px 10px; font-size: 12px; min-width: 150px; border-color: var(--gold); animation: toastin .35s ease; }
   .boost .track { height: 4px; margin-top: 4px; }
@@ -221,6 +241,12 @@
     .sell { width: 100%; }
     .sell button { flex: 1; padding: 8px 6px; font-size: 12px; white-space: nowrap; }
     #toasts { top: 172px; }
+    .clicker { width: 100%; }
+    #mineBtn { flex-direction: row; gap: 6px; padding: 7px 10px; min-width: 0; }
+    #mineBtn span { font-size: 15px; }
+    .odm { flex: 1; width: auto; }
+    body.noscene #dock { width: auto; right: 6px; top: 124px; bottom: auto; }
+    body.noscene #panel { left: 6px; height: auto; }
     .roomrow, .coinrow { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
     .roomrow .chip { white-space: nowrap; padding: 5px 10px; font-size: 12px; }
     .boost { min-width: 0; font-size: 11px; padding: 4px 8px; }
@@ -246,6 +272,7 @@
       <div class="pill net"><i>💹</i><div><small>Netto</small><b id="net">–</b></div></div>
     </div>
     <div class="tools">
+      <button class="ico" id="scene" title="Raum ein-/ausblenden">👁️</button>
       <button class="ico" id="mute" title="Ton">🔊</button>
       <button class="ico" id="reset" title="Spielstand löschen">⟲</button>
     </div>
@@ -263,6 +290,10 @@
         <div class="mhead"><span id="roomName"></span><span id="heatTxt"></span></div>
         <div class="track big"><div class="fill" id="heatFill"></div></div>
         <div id="roomSub"></div>
+      </div>
+      <div class="clicker">
+        <button id="mineBtn" title="Manuell minen"><span>⛏️</span><b>Minen</b><small id="clickVal"></small></button>
+        <div class="odm"><div class="mhead"><span id="comboTxt">Combo ×1,00</span><span>🔥 Overdrive</span></div><div class="track"><div class="fill" id="odFill"></div></div></div>
       </div>
       <div class="sell">
         <button data-act="sell" data-f="0.5" id="sell50">50 %</button>

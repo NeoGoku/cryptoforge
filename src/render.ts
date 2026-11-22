@@ -605,10 +605,12 @@ export class MainScene extends Phaser.Scene {
       }
       return;
     }
-    const gain = game.click();
+    const r = game.click();
     sfx.click();
-    this.burst(p.x, p.y, 0x4fd1c5, 8);
-    this.floatText(p.x, p.y, `+${gain.toFixed(3)} BIT`);
+    if (r.crit) sfx.fx('crit');
+    this.burst(p.x, p.y, r.crit ? 0xffc857 : 0x4fd1c5, r.crit ? 18 : 8);
+    const amt = r.amt < 0.01 ? r.amt.toFixed(5) : r.amt < 10 ? r.amt.toFixed(3) : r.amt.toFixed(1);
+    this.floatText(p.x, p.y, `${r.crit ? 'KRIT! ' : ''}+${amt} ${r.coin}${r.combo >= 5 ? ` ×${(1 + r.combo * 0.04).toFixed(2)}` : ''}`, r.crit ? '#ffd479' : '#7af5e8');
   }
 
   private center(): Pt {
@@ -633,6 +635,7 @@ export class MainScene extends Phaser.Scene {
       case 'block': this.burst(c.x, c.y, 0xffc857, 24); this.floatText(c.x, c.y - 30 * DPR, 'BLOCK GEFUNDEN!', '#ffd479'); break;
       case 'research': this.burst(c.x, c.y, 0x8c7bff, 24); break;
       case 'repair': this.burst(c.x, c.y, 0x7ee787, 16); break;
+      case 'overdrive': this.cameras.main.flash(250, 255, 120, 60); this.burst(c.x, c.y, 0xff6a3d, 30); this.floatText(c.x, c.y - 30 * DPR, 'OVERDRIVE!', '#ff9a6b'); break;
       case 'bonus': this.burst(c.x, c.y, 0xffc857, 22); break;
       case 'prestige': this.cameras.main.flash(600, 255, 255, 255); this.burst(c.x, c.y, 0xffffff, 40); break;
       case 'win': this.burst(c.x, c.y, 0xffc857, 18); break;

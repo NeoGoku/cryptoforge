@@ -7,7 +7,8 @@ import type { Holder } from './world';
 
 export const BASE_TARIFF = 0.32;   // EUR/kWh
 export const POWER_SCALE = 5000;   // 1 s Spielzeit = 5000 s Stromverbrauch (macht Strom relevant)
-export const CLICK_BIT = 0.01;
+export const CLICK_EUR = 0.3;      // Mindestwert eines Klicks
+export const CLICK_SHARE = 0.12;   // Klick = 12 % der Produktion je Sekunde
 export const POOL_FEE = 0.03;
 export const SOLO_MULT = 1.12;
 export const SOLO_MEAN = 25;       // Sekunden zwischen Blöcken (Ø)
@@ -25,7 +26,7 @@ export type EvId = 'outage' | 'heat' | 'sale';
 
 export interface Stats {
   events: number; outages: number; hacked: number; blocks: number; repairs: number;
-  loans: number; repaid: number; powerSpent: number; rentPaid: number; interestPaid: number; clicks: number; salaryPaid: number; bonuses: number; built: number; bargains: number;
+  loans: number; repaid: number; powerSpent: number; rentPaid: number; interestPaid: number; clicks: number; salaryPaid: number; bonuses: number; built: number; bargains: number; maxCombo: number; overdrives: number;
 }
 
 export interface SaveData {
@@ -44,6 +45,7 @@ export interface SaveData {
   draft: Build;                        // aktuelle Konfiguration in der Werkstatt
   mid: number;                         // Zähler für Maschinen-IDs
   addr: string;                        // eigene Wallet-Adresse
+  nick: string;                        // Spielername
   rooms: Record<string, Slots>;
   cond: Record<string, number>;
   roomCoin: Record<string, string>;
@@ -113,6 +115,7 @@ export const MISSIONS: Mission[] = [
   mk('Luxus-Mining', 'Mine Luxar (braucht 500+ H/s je Gerät).', 15000, (g) => (g.rate.LUX ?? 0) > 0, (g) => [(g.rate.LUX ?? 0) > 0 ? 1 : 0, 1]),
   mk('Top 10', 'Erreiche die Top 10 der Rich List.', 50000, (g) => g.myRank() <= 10, (g) => [g.myRank() <= 10 ? 1 : 0, 1]),
   mk('Qubit-Mining', 'Mine Qubit mit einem Quantenrechner.', 40000, (g) => (g.rate.QBT ?? 0) > 0, (g) => [(g.rate.QBT ?? 0) > 0 ? 1 : 0, 1]),
+  mk('Klick-Profi', 'Erreiche eine Klick-Combo von 30.', 3000, (g) => g.s.stats.maxCombo >= 30, (g) => min1(g.s.stats.maxCombo, 30)),
   mk('Sonnenkraft', 'Mine Helion mit einem Fusion Core.', 120000, (g) => (g.rate.HEL ?? 0) > 0, (g) => [(g.rate.HEL ?? 0) > 0 ? 1 : 0, 1]),
 ];
 
@@ -150,6 +153,9 @@ export const ACHIEVEMENTS: Achievement[] = [
   ach('bargain', 'Schnäppchenjäger', 'Hardware unter 85 % des Normalpreises gekauft.', (g) => g.s.stats.bargains >= 1),
   ach('top10', 'Krypto-Elite', 'Top 10 der Rich List.', (g) => g.myRank() <= 10),
   ach('top1', 'Reichste Wallet der Welt', 'Platz 1 der Rich List.', (g) => g.myRank() <= 1),
+  ach('combo50', 'Klick-Maschine', 'Eine Klick-Combo von 50 erreicht.', (g) => g.s.stats.maxCombo >= 50),
+  ach('od', 'Overdrive', 'Durch Klicken einen Overdrive ausgelöst.', (g) => g.s.stats.overdrives >= 1),
+  ach('od10', 'Dauerfeuer', '10 Overdrives ausgelöst.', (g) => g.s.stats.overdrives >= 10),
 ];
 
 const HW_NEWS: Record<HwMarket, { up: string[]; down: string[] }> = {
@@ -180,7 +186,10 @@ export const BOOST_INFO: Record<string, { name: string; icon: string; total: num
   hash: { name: 'Turbo ×2 Hash', icon: '⚡', total: 15 },
   click: { name: 'Klick ×10', icon: '👆', total: 20 },
   cool: { name: 'Kältefront −50 % Hitze', icon: '❄️', total: 30 },
+  od: { name: 'Overdrive ×2 Hash', icon: '🔥', total: 20 },
 };
+/** Klicks bis zum Overdrive. */
+export const OD_MAX = 120;
 const NEWS_UP = ['Großinvestor steigt bei {c} ein', 'Börse listet {c} neu', '{c} bekommt Partnerschaft mit Tech-Riesen', 'Influencer feiert {c}'];
 const NEWS_DOWN = ['Gerüchte über Sicherheitslücke bei {c}', 'Regulierer prüft {c}', 'Wal verkauft große {c}-Bestände', 'Exchange pausiert {c}-Auszahlungen'];
 
@@ -225,6 +234,10 @@ export class Game {
   private worldTimer = 0;
   private snapTimer = 0;
   private statCache = new Map<string, MachineStat>();
+  /** Klick-Combo (steigt bei schnellen Klicks, fällt bei Pause) und Overdrive-Ladung. */
+  combo = 0;
+  od = 0;
+  private comboT = 99;
   private regimeTimer = 90;
   private newsTimer = 75;
   private flyerTimer = 25;
@@ -559,7 +572,7 @@ export class Game {
       const throttle = heat > limit ? limit / heat : 1;
       if (throttle < 1) overheated = true;
       const cond = s.cond[r.id] ?? 100;
-      const eff = (0.5 + 0.5 * cond / 100) * throttle * oc * pm * (this.boostOn('hash') ? 2 : 1);
+      const eff = (0.5 + 0.5 * cond / 100) * throttle * oc * pm * (this.boostOn('hash') ? 2 : 1) * (this.boostOn('od') ? 2 : 1);
       let rHash = 0;
       let rCoins = 0;
       let rPower = 0;
@@ -605,6 +618,8 @@ export class Game {
     this.updateMarket(dt);
     this.updateEvents(dt);
     this.updateFlyer(dt);
+    this.comboT += dt;
+    if (this.comboT > 1.2 && this.combo > 0) this.combo = Math.max(0, this.combo - dt * 25);
 
     const running = this.running();
     if (running) {
@@ -1388,6 +1403,7 @@ export class Game {
       mission: this.s.mission,
       blueprints: this.s.blueprints,
       addr: this.s.addr,
+      nick: this.s.nick,
     };
     this.s = { ...this.fresh(), ...keep };
     this.fx('prestige');
@@ -1395,11 +1411,47 @@ export class Game {
   }
 
   /** Manuelles Mining per Klick (BitForge). */
-  click(): number {
-    const gain = CLICK_BIT * this.prestigeMult() * (this.boostOn('click') ? 10 : 1);
-    this.credit('BIT', gain);
-    this.s.stats.clicks++;
-    return gain;
+  /** Wert eines Klicks in EUR ohne Combo und Krit (für die Anzeige). */
+  clickBase(): number {
+    const power = 1 + 0.5 * (this.s.upgrades.click ?? 0);
+    return Math.max(CLICK_EUR, (this.running() ? this.incomeEurPerSec : 0) * CLICK_SHARE) * power * this.prestigeMult();
+  }
+
+  comboMult(): number {
+    return 1 + Math.floor(this.combo) * 0.04;
+  }
+
+  /** Manuelles Minen: Wert skaliert mit der Produktion, Combo, Krits und Overdrive-Ladung. */
+  click(): { amt: number; coin: string; crit: boolean; combo: number; od: boolean } {
+    const s = this.s;
+    const coin = s.roomCoin[s.active] ?? DEFAULT_COIN;
+    this.combo = this.comboT < 1.2 ? Math.min(50, Math.floor(this.combo) + 1) : Math.max(1, Math.floor(this.combo / 2));
+    this.comboT = 0;
+    const crit = Math.random() < 0.06 + 0.01 * (s.upgrades.click ?? 0);
+    const eur = this.clickBase() * this.comboMult() * (crit ? 8 : 1) * (this.boostOn('click') ? 10 : 1);
+    const amt = eur / this.prices[coin];
+    this.credit(coin, amt);
+    s.stats.clicks++;
+    s.stats.maxCombo = Math.max(s.stats.maxCombo, this.combo);
+    let od = false;
+    if (!this.boostOn('od')) {
+      this.od += crit ? 6 : 1;
+      if (this.od >= OD_MAX) {
+        this.od = 0;
+        s.boosts.od = s.playSec + BOOST_INFO.od.total;
+        s.stats.overdrives++;
+        od = true;
+        this.fx('overdrive');
+        this.toast('Bonus: Overdrive! Hash ×2 für 20 s');
+        this.recalc();
+      }
+    }
+    return { amt, coin, crit, combo: this.combo, od };
+  }
+
+  setNick(n: string) {
+    this.s.nick = n.replace(/[<>&"'`]/g, '').trim().slice(0, 20);
+    this.afterChange();
   }
 
   // ---- Persistenz ----
@@ -1408,12 +1460,12 @@ export class Game {
     const starter: Machine = { id: 'm1', name: 'Alter Familien-PC', build: cloneBuild(STARTER_PC) };
     return {
       v: 3, boosts: {}, cash: 350, wallet: {}, staked: {}, soldEur: 0, minedTotal: 0, bought: 0, playSec: 0,
-      machines: { m1: starter }, parts: {}, blueprints: [], draft: emptyBuild(), mid: 2, addr: makeAddr(),
+      machines: { m1: starter }, parts: {}, blueprints: [], draft: emptyBuild(), mid: 2, addr: makeAddr(), nick: '',
       rooms: { kid: ['m1', null] }, cond: { kid: 100 }, roomCoin: { kid: 'MON' }, upgrades: {}, staff: {},
       research: [], researching: null, debt: 0, insured: false, mode: 'pool', autoSell: { on: false, min: 100 },
       mission: 0, ach: [], overheated: false, ev: null, prestige: { points: 0, resets: 0, lifetime: 0 },
       streak: { last: '', count: 0 }, tutorial: false,
-      stats: { events: 0, outages: 0, hacked: 0, blocks: 0, repairs: 0, loans: 0, repaid: 0, powerSpent: 0, rentPaid: 0, interestPaid: 0, clicks: 0, salaryPaid: 0, bonuses: 0, built: 0, bargains: 0 },
+      stats: { events: 0, outages: 0, hacked: 0, blocks: 0, repairs: 0, loans: 0, repaid: 0, powerSpent: 0, rentPaid: 0, interestPaid: 0, clicks: 0, salaryPaid: 0, bonuses: 0, built: 0, bargains: 0, maxCombo: 0, overdrives: 0 },
       netHistory: [], savedAt: Date.now(), active: 'kid',
     };
   }

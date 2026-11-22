@@ -1,4 +1,4 @@
-import { game, MISSIONS, ACHIEVEMENTS, INSURE_RATE, LOAN_RATE, POOL_FEE, BOOST_INFO } from './game';
+import { game, MISSIONS, ACHIEVEMENTS, INSURE_RATE, LOAN_RATE, POOL_FEE, BOOST_INFO, OD_MAX } from './game';
 import { ROOMS, UPGRADES, STAFF, TECHS, COINS, LOANS, DEFAULT_COIN, upgradeCost, staffCost, coinDef, techDef } from './config';
 import type { Kind } from './config';
 import { PARTS, PREBUILT, CATS, CAT_ORDER, partDef, prebuiltDef, partLabel, partIcon, machineIcon, buildStats } from './hardware';
@@ -114,6 +114,29 @@ export class HUD {
     $('dock').addEventListener('click', (e) => this.onAction(e));
     $('quest').addEventListener('click', () => { this.tab = 'tasks'; this.renderAll(); });
     $('reset').addEventListener('click', () => this.settingsModal());
+    // Raum-Ansicht ein-/ausblenden
+    const scene = $('scene');
+    const applyScene = () => {
+      document.body.classList.toggle('noscene', !settings.scene);
+      scene.textContent = settings.scene ? '👁️' : '🙈';
+      scene.title = settings.scene ? 'Raum ausblenden' : 'Raum einblenden';
+      this.fitPanel();
+    };
+    scene.addEventListener('click', () => { settings.scene = !settings.scene; saveSettings(); sfx.tab(); applyScene(); });
+    applyScene();
+    new ResizeObserver(() => this.fitPanel()).observe($('dock'));
+    window.addEventListener('resize', () => this.fitPanel());
+    // Manuelles Minen über den Button (funktioniert auch bei ausgeblendetem Raum)
+    $('mineBtn').addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      sfx.unlock();
+      const r = game.click();
+      sfx.click();
+      if (r.crit) sfx.fx('crit');
+      const b = $('mineBtn').getBoundingClientRect();
+      const amt = r.amt < 0.01 ? r.amt.toFixed(5) : r.amt < 10 ? r.amt.toFixed(3) : r.amt.toFixed(1);
+      this.floaty(b.left + b.width / 2 + (Math.random() - 0.5) * 30, b.top - 6, `${r.crit ? 'KRIT! ' : ''}+${amt} ${r.coin}`);
+    });
     const mute = $('mute');
     mute.textContent = sfx.isMuted() ? '🔇' : '🔊';
     mute.addEventListener('click', () => {
@@ -163,22 +186,26 @@ export class HUD {
       ['Dein erster Miner 🖥️', 'Im Kinderzimmer steht der alte Familien-PC. Öffne im Lager „Bearbeiten“, setze in der Werkstatt eine Grafikkarte ein und baue ihn neu zusammen.'],
       ['Werkstatt & Shop 🛠️', 'Stelle PCs und offene Rigs aus Gehäuse, Mainboard, CPU, RAM, SSD, Netzteil und Grafikkarten zusammen. Fehlende Teile werden beim Bauen gekauft. Gute Konfigurationen speicherst du als Blueprint.'],
       ['Coins & Hardware 📈', 'Jeder Coin braucht eine Mindest-Hashrate und den passenden Gerätetyp. Hardware-Preise schwanken mit dem Markt und mit News – kauf günstig, verkauf teuer.'],
+      ['Aktiv minen ⛏️', 'Tippe in den Raum oder auf „Minen“: Jeder Klick bringt einen Anteil deiner Produktion. Schnelle Klicks bauen eine Combo bis ×3 auf, Krits geben ×8, und die Klickleiste lädt einen Overdrive mit doppelter Hashrate auf.'],
       ['Verkaufen & Kosten 💶', 'Verkaufe Coins im Dock unten. Achte auf Hitze, Strom und Miete. Das Netto oben zeigt, ob du Gewinn machst.'],
       ['Mehr entdecken 🚀', 'Mehrere Münzen, Pool oder Solo, Kredite, Versicherung, Personal, Forschung, Events und Prestige warten auf dich. Missionen führen dich durch.'],
     ];
     const [t, p] = steps[step];
     const last = step === steps.length - 1;
-    this.modal(`<h2>${t}</h2><p>${p}</p><div class="dots">${steps.map((_, i) => `<i class="${i === step ? 'on' : ''}"></i>`).join('')}</div>
+    const nickField = step === 0 ? `<label style="margin-top:10px"><span>Dein Nickname</span></label><input id="tnick" class="txt" maxlength="20" placeholder="z. B. HashKing" value="${game.s.nick}">` : '';
+    this.modal(`<h2>${t}</h2><p>${p}</p>${nickField}<div class="dots">${steps.map((_, i) => `<i class="${i === step ? 'on' : ''}"></i>`).join('')}</div>
       <div class="btns" style="margin-top:14px"><button id="tskip">Überspringen</button><button class="primary" id="tnext">${last ? 'Los geht’s' : 'Weiter'}</button></div>`, (m) => {
-      const done = () => { game.s.tutorial = true; game.save(); this.closeModal(); };
+      const saveNick = () => { const i = m.querySelector<HTMLInputElement>('#tnick'); if (i && i.value.trim()) game.setNick(i.value); };
+      const done = () => { saveNick(); game.s.tutorial = true; game.save(); this.closeModal(); };
       m.querySelector('#tskip')!.addEventListener('click', done);
-      m.querySelector('#tnext')!.addEventListener('click', () => { sfx.unlock(); if (last) done(); else this.tutorial(step + 1); });
+      m.querySelector('#tnext')!.addEventListener('click', () => { sfx.unlock(); saveNick(); if (last) done(); else this.tutorial(step + 1); });
     });
   }
 
   private settingsModal() {
     const code = game.exportSave();
     this.modal(`<h2>Einstellungen</h2>
+      <label><span>Nickname</span></label><input id="nick" class="txt" maxlength="20" placeholder="Dein Name" value="${game.s.nick}">
       <label><span>Musik</span><b id="mv">${Math.round(settings.music * 100)} %</b></label><input type="range" id="music" min="0" max="100" value="${settings.music * 100}">
       <label><span>Soundeffekte</span><b id="sv">${Math.round(settings.sfx * 100)} %</b></label><input type="range" id="sfxv" min="0" max="100" value="${settings.sfx * 100}">
       <div class="seg" style="margin-top:14px"><button data-q="high" class="${settings.quality === 'high' ? 'on' : ''}">Grafik hoch</button><button data-q="low" class="${settings.quality === 'low' ? 'on' : ''}">Grafik sparsam</button></div>
@@ -198,6 +225,7 @@ export class HUD {
       q('#copy').addEventListener('click', () => { void navigator.clipboard?.writeText(code); this.toast('Code kopiert.'); });
       q('#doimp').addEventListener('click', () => { if (!game.importSave((q('#imp') as HTMLTextAreaElement).value)) this.toast('Kein gültiger Code.'); });
       q('#tut').addEventListener('click', () => this.tutorial(0));
+      q('#nick').addEventListener('change', (e) => { game.setNick((e.target as HTMLInputElement).value); this.toast('Nickname gespeichert.'); });
       let armed = false;
       q('#rst').addEventListener('click', (e) => { if (!armed) { armed = true; (e.target as HTMLElement).textContent = 'Wirklich löschen?'; } else game.reset(); });
       q('#close').addEventListener('click', () => this.closeModal());
@@ -494,17 +522,19 @@ export class HUD {
     const rank = game.myRank();
     const rows = game.holders.map((h) => ({ h, v: holderValue(h, game.prices) })).sort((a, b) => b.v - a.v);
     const icon = { person: '👤', fund: '🏦', exchange: '🏛️', whale: '🐋' } as const;
-    let out = `<div class="card" style="--c:var(--gold)"><div class="row"><span class="name">👛 Deine Wallet</span><span class="tag" style="--c:var(--gold)">Platz ${rank}</span></div>
+    const nick = game.s.nick || 'Du';
+    let out = `<div class="card" style="--c:var(--gold)"><div class="row"><span class="name">👛 ${game.s.nick || 'Deine Wallet'}</span><span class="tag" style="--c:var(--gold)">Platz ${rank}</span></div>
       <div class="mono">${game.s.addr}</div>${kv('Vermögen', `<b>${eur(me)}</b>`)}
       <div class="muted">${rank > 1 ? `Bis Platz ${rank - 1}: ${eur(rows[rank - 2].v - me)}` : 'Du bist die reichste Wallet der Welt.'}</div></div>`;
     out += title('Rich List · FX-Chain');
     let shown = false;
     rows.forEach((r, i) => {
-      if (!shown && i === rank - 1) { out += this.richRow(rank, '⭐', 'Du', 'Deine Wallet', game.s.addr, me, 0, true); shown = true; }
+      if (!shown && i === rank - 1) { out += this.richRow(rank, '⭐', nick, 'Deine Wallet', game.s.addr, me, 0, true); shown = true; }
       const top = COINS.reduce((a, c) => ((r.h.hold[c.id] ?? 0) * game.prices[c.id] > (r.h.hold[a.id] ?? 0) * game.prices[a.id] ? c : a), COINS[0]);
       out += this.richRow(i + 1 + (shown ? 1 : 0), icon[r.h.kind], r.h.name, `${r.h.tag} · ${num(r.h.txs)} Tx · meist ${top.id}`, r.h.addr, r.v, r.h.prev ? r.v / r.h.prev - 1 : 0, false);
     });
-    if (!shown) out += this.richRow(rank, '⭐', 'Du', 'Deine Wallet', game.s.addr, me, 0, true);
+    if (!shown) out += this.richRow(rank, '⭐', nick, 'Deine Wallet', game.s.addr, me, 0, true);
+    if (!game.s.nick) out = `<div class="muted" style="margin-bottom:8px">Tipp: Lege in den Einstellungen einen Nickname fest.</div>` + out;
     return out + '<div class="muted" style="margin-top:6px">Alle Personen, Firmen und Adressen sind frei erfunden.</div>';
   }
 
@@ -805,6 +835,13 @@ export class HUD {
     setTimeout(() => d.remove(), 1600);
   }
 
+  /** Mobil ohne Raum: Panel direkt unter dem Dock beginnen lassen. */
+  private fitPanel() {
+    const p = $('panel');
+    if (!settings.scene && window.innerWidth < 900) p.style.top = `${Math.round($('dock').getBoundingClientRect().bottom + 6)}px`;
+    else p.style.top = '';
+  }
+
   private renderBoosts() {
     const html = Object.entries(BOOST_INFO).filter(([id]) => game.boostOn(id)).map(([id, b]) => {
       const left = game.boostLeft(id);
@@ -826,6 +863,13 @@ export class HUD {
     this.debt.set(game.s.debt);
     this.cash.tick(); this.coins.tick(); this.price.tick(); this.hash.tick(); this.debt.tick();
     $('coinLbl').textContent = coin;
+    // Klick-Anzeige
+    const odOn = game.boostOn('od');
+    const odF = $('odFill');
+    odF.style.width = `${odOn ? (game.boostLeft('od') / BOOST_INFO.od.total) * 100 : (game.od / OD_MAX) * 100}%`;
+    odF.classList.toggle('on', odOn);
+    $('comboTxt').textContent = `Combo ×${num(game.comboMult(), 2)}`;
+    $('mineBtn').classList.toggle('hot', game.combo >= 10);
     this.updateFlyer();
     $('cash').classList.toggle('neg', game.s.cash < 0);
 
@@ -907,6 +951,8 @@ export class HUD {
     }
 
     this.renderBoosts();
+    const cv = game.clickBase() * game.comboMult() * (game.boostOn('click') ? 10 : 1);
+    $('clickVal').textContent = `≈ ${eur(cv)}`;
 
     // Dock
     const room = ROOMS.find((x) => x.id === game.s.active)!;

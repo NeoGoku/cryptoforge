@@ -69,6 +69,7 @@ export const UPGRADES: UpgradeDef[] = [
   { id: 'oc', name: 'Overclocking', desc: 'Hash +10 % je Stufe', max: 5, base: 400, mult: 2.0 },
   { id: 'psu', name: 'Netzteil-Effizienz', desc: 'Verbrauch −8 % je Stufe', max: 5, base: 600, mult: 2.2 },
   { id: 'fw', name: 'Firewall', desc: 'Hack-Risiko −35 % je Stufe', max: 3, base: 1200, mult: 2.6 },
+  { id: 'click', name: 'Mining-Skript', desc: 'Klickwert +50 % und Krit-Chance +1 % je Stufe', max: 5, base: 250, mult: 2.4 },
   { id: 'bat', name: 'Notstrom-Akku', desc: 'Stromausfälle −30 % kürzer je Stufe', max: 3, base: 900, mult: 2.4 },
 ];
 

@@ -175,6 +175,8 @@ export const sfx = {
       case 'autosell': tone(1568, 0.1, 'triangle', 0.07); break;
       case 'win': this.win(); break;
       case 'bonus': chime(880, 5, 0.05, 'triangle'); break;
+      case 'crit': tone(1320, 0.12, 'square', 0.09); tone(1760, 0.2, 'triangle', 0.09, undefined, 0.06); break;
+      case 'overdrive': chime(330, 8, 0.05, 'sawtooth'); tone(110, 1.2, 'sine', 0.18, 440); break;
       case 'news-up': tone(880, 0.12, 'triangle', 0.08); tone(1175, 0.18, 'triangle', 0.08, undefined, 0.1); break;
       case 'news-down': tone(520, 0.14, 'triangle', 0.08); tone(390, 0.22, 'triangle', 0.08, undefined, 0.12); break;
     }
