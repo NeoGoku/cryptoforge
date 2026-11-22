@@ -130,6 +130,19 @@
   .rich.me { background: rgba(255,200,87,.12); border-color: var(--gold); }
   .rich .rk { width: 30px; color: var(--mut); font-weight: 700; font-size: 11px; }
   .rich .av { font-size: 18px; }
+  .gpurow { display: flex; align-items: center; gap: 8px; padding: 5px 0; border-top: 1px solid var(--line); }
+  .gpurow:first-of-type { border-top: 0; }
+  .gpurow .gi { flex: 1; min-width: 0; }
+  .gpurow .gi b { display: block; font-size: 12.5px; }
+  .gpurow .gi small { color: var(--mut); font-size: 10.5px; }
+  .step { display: flex; align-items: center; gap: 4px; flex: none; }
+  .step button { width: 28px; height: 28px; padding: 0; font-size: 16px; border-radius: 8px; line-height: 1; }
+  .step b { min-width: 22px; text-align: center; font-size: 14px; }
+  .step.on b { color: var(--acc); }
+  .deal { position: absolute; top: 76px; right: 356px; max-width: 300px; padding: 8px 12px; border-color: var(--gold); animation: toastin .35s ease; font-size: 12.5px; z-index: 4; }
+  .deal b { display: block; font-size: 13px; }
+  .deal .track { height: 4px; margin: 6px 0; }
+  .deal .btns { margin: 0; }
   .clicker { display: flex; align-items: center; gap: 8px; flex: none; }
   #mineBtn { display: flex; flex-direction: column; align-items: center; gap: 0; padding: 6px 12px; min-width: 76px; border-radius: 12px; background: linear-gradient(180deg, #ffd479, #e0a530); color: #2a1a00; border: 0; box-shadow: 0 3px 0 #9a6f10, 0 6px 14px rgba(255,200,87,.25); touch-action: manipulation; user-select: none; }
   #mineBtn span { font-size: 18px; line-height: 1; }
@@ -241,6 +254,7 @@
     .sell { width: 100%; }
     .sell button { flex: 1; padding: 8px 6px; font-size: 12px; white-space: nowrap; }
     #toasts { top: 172px; }
+    .deal { right: 6px; left: 6px; top: 128px; max-width: none; }
     .clicker { width: 100%; }
     #mineBtn { flex-direction: row; gap: 6px; padding: 7px 10px; min-width: 0; }
     #mineBtn span { font-size: 15px; }
@@ -296,12 +310,13 @@
         <div class="odm"><div class="mhead"><span id="comboTxt">Combo ×1,00</span><span>🔥 Overdrive</span></div><div class="track"><div class="fill" id="odFill"></div></div></div>
       </div>
       <div class="sell">
-        <button data-act="sell" data-f="0.5" id="sell50">50 %</button>
-        <button class="primary" data-act="sell" data-f="1" id="sellAll">Alles verkaufen</button>
+        <button data-act="sell-all" data-f="0.5" id="sell50">50 %</button>
+        <button class="primary" data-act="sell-all" data-f="1" id="sellAll">Alles verkaufen</button>
       </div>
     </div>
   </footer>
   <div id="evbar" class="glass" style="display:none"></div>
+  <div id="deal" class="deal glass" style="display:none"></div>
   <div id="toasts"></div>
   <div id="modal" style="display:none"></div>
 </div>

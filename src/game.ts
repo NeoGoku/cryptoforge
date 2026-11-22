@@ -1,4 +1,4 @@
-import { ROOMS, COINS, LOANS, DEFAULT_COIN, canMine, roomDef, upgradeDef, upgradeCost, coinDef, techDef, staffDef, staffCost } from './config';
+import { ROOMS, COINS, LOANS, UPGRADES, DEFAULT_COIN, canMine, roomDef, upgradeDef, upgradeCost, coinDef, techDef, staffDef, staffCost } from './config';
 import type { CoinDef, Kind } from './config';
 import { PARTS, PREBUILT, CATS, partDef, prebuiltDef, buildStats, machineStats, buildPartList, emptyBuild, cloneBuild } from './hardware';
 import type { Machine, MachineStat, Blueprint, Build, PartCat, HwMarket } from './hardware';
@@ -26,7 +26,7 @@ export type EvId = 'outage' | 'heat' | 'sale';
 
 export interface Stats {
   events: number; outages: number; hacked: number; blocks: number; repairs: number;
-  loans: number; repaid: number; powerSpent: number; rentPaid: number; interestPaid: number; clicks: number; salaryPaid: number; bonuses: number; built: number; bargains: number; maxCombo: number; overdrives: number;
+  loans: number; repaid: number; powerSpent: number; rentPaid: number; interestPaid: number; clicks: number; salaryPaid: number; bonuses: number; built: number; bargains: number; maxCombo: number; overdrives: number; deals: number; tipsWon: number;
 }
 
 export interface SaveData {
@@ -117,6 +117,23 @@ export const MISSIONS: Mission[] = [
   mk('Qubit-Mining', 'Mine Qubit mit einem Quantenrechner.', 40000, (g) => (g.rate.QBT ?? 0) > 0, (g) => [(g.rate.QBT ?? 0) > 0 ? 1 : 0, 1]),
   mk('Klick-Profi', 'Erreiche eine Klick-Combo von 30.', 3000, (g) => g.s.stats.maxCombo >= 30, (g) => min1(g.s.stats.maxCombo, 30)),
   mk('Sonnenkraft', 'Mine Helion mit einem Fusion Core.', 120000, (g) => (g.rate.HEL ?? 0) > 0, (g) => [(g.rate.HEL ?? 0) > 0 ? 1 : 0, 1]),
+  mk('Drei Eigenbauten', 'Baue 3 Miner in der Werkstatt.', 2000, (g) => g.s.stats.built >= 3, (g) => min1(g.s.stats.built, 3)),
+  mk('Sammler', 'Speichere 3 Blueprints.', 2500, (g) => g.s.blueprints.length >= 3, (g) => min1(g.s.blueprints.length, 3)),
+  mk('Mining-Skript III', 'Kaufe das Upgrade Mining-Skript auf Stufe 3.', 3000, (g) => (g.s.upgrades.click ?? 0) >= 3, (g) => min1(g.s.upgrades.click ?? 0, 3)),
+  mk('Tausend Klicks', 'Klicke 1.000-mal.', 5000, (g) => g.s.stats.clicks >= 1000, (g) => min1(g.s.stats.clicks, 1000)),
+  mk('Schnäppchen', 'Nimm ein Händler-Angebot an.', 2000, (g) => g.s.stats.deals >= 1, (g) => min1(g.s.stats.deals, 1)),
+  mk('Insider', 'Lass 2 Insider-Tipps aufgehen.', 5000, (g) => g.s.stats.tipsWon >= 2, (g) => min1(g.s.stats.tipsWon, 2)),
+  mk('Kleines Team', 'Beschäftige insgesamt 3 Mitarbeiter.', 5000, (g) => (g.s.staff.tech ?? 0) + (g.s.staff.sec ?? 0) >= 3, (g) => min1((g.s.staff.tech ?? 0) + (g.s.staff.sec ?? 0), 3)),
+  mk('Festung', 'Firewall auf Stufe 3.', 6000, (g) => (g.s.upgrades.fw ?? 0) >= 3, (g) => min1(g.s.upgrades.fw ?? 0, 3)),
+  mk('Overdrive-Meister', 'Löse 3 Overdrives aus.', 6000, (g) => g.s.stats.overdrives >= 3, (g) => min1(g.s.stats.overdrives, 3)),
+  mk('Kilohash', 'Erreiche 1.000 H/s Gesamtleistung.', 6000, (g) => g.hashTotal >= 1000, (g) => min1(g.hashTotal, 1000)),
+  mk('Drei Münzen', 'Mine 3 verschiedene Coins gleichzeitig.', 8000, (g) => COINS.filter((c) => (g.rate[c.id] ?? 0) > 0).length >= 3, (g) => min1(COINS.filter((c) => (g.rate[c.id] ?? 0) > 0).length, 3)),
+  mk('Händler', 'Verkaufe Coins im Wert von 50.000 €.', 15000, (g) => g.s.soldEur >= 50000, (g) => min1(g.s.soldEur, 50000)),
+  mk('Top 25', 'Erreiche die Top 25 der Rich List.', 15000, (g) => g.myRank() <= 25, (g) => [g.myRank() <= 25 ? 1 : 0, 1]),
+  mk('Keller', 'Schalte den Keller frei.', 15000, (g) => !!g.s.rooms.basement, (g) => [g.s.rooms.basement ? 1 : 0, 1]),
+  mk('Zehntausend', 'Erreiche 10.000 H/s Gesamtleistung.', 40000, (g) => g.hashTotal >= 10000, (g) => min1(g.hashTotal, 10000)),
+  mk('Millionär', 'Erreiche 1.000.000 € Vermögen.', 100000, (g) => g.netWorth() >= 1e6, (g) => min1(Math.max(0, g.netWorth()), 1e6)),
+  mk('Rechenzentrum', 'Schalte das Rechenzentrum frei.', 80000, (g) => !!g.s.rooms.dc, (g) => [g.s.rooms.dc ? 1 : 0, 1]),
 ];
 
 const ach = (id: string, name: string, desc: string, test: (g: Game) => boolean): Achievement => ({ id, name, desc, test });
@@ -156,6 +173,21 @@ export const ACHIEVEMENTS: Achievement[] = [
   ach('combo50', 'Klick-Maschine', 'Eine Klick-Combo von 50 erreicht.', (g) => g.s.stats.maxCombo >= 50),
   ach('od', 'Overdrive', 'Durch Klicken einen Overdrive ausgelöst.', (g) => g.s.stats.overdrives >= 1),
   ach('od10', 'Dauerfeuer', '10 Overdrives ausgelöst.', (g) => g.s.stats.overdrives >= 10),
+  ach('builder25', 'Meisterschrauber', '25 Miner selbst gebaut.', (g) => g.s.stats.built >= 25),
+  ach('bp5', 'Planer', '5 Blueprints gespeichert.', (g) => g.s.blueprints.length >= 5),
+  ach('clicks1k', 'Klickfinger', '1.000 Klicks.', (g) => g.s.stats.clicks >= 1000),
+  ach('clicks10k', 'Sehnenscheide', '10.000 Klicks.', (g) => g.s.stats.clicks >= 10000),
+  ach('deal5', 'Verhandler', '5 Händler-Angebote angenommen.', (g) => g.s.stats.deals >= 5),
+  ach('tip3', 'Insiderwissen', '3 Insider-Tipps sind aufgegangen.', (g) => g.s.stats.tipsWon >= 3),
+  ach('hash100k', 'Gigahash-Club', '100.000 H/s Gesamtleistung.', (g) => g.hashTotal >= 1e5),
+  ach('sold100k', 'Großhändler', 'Coins im Wert von 100.000 € verkauft.', (g) => g.s.soldEur >= 1e5),
+  ach('sold1m', 'Börsenhai', 'Coins im Wert von 1.000.000 € verkauft.', (g) => g.s.soldEur >= 1e6),
+  ach('coins5', 'Portfolio', 'Mindestens 5 verschiedene Coins im Wallet.', (g) => COINS.filter((c) => (g.s.wallet[c.id] ?? 0) > 1e-9).length >= 5),
+  ach('rooms4', 'Expansion', '4 Räume freigeschaltet.', (g) => ROOMS.filter((r) => !!g.s.rooms[r.id]).length >= 4),
+  ach('team', 'Vollbesetzt', 'Alle Mitarbeiter-Stufen erreicht.', (g) => (g.s.staff.tech ?? 0) >= 3 && (g.s.staff.sec ?? 0) >= 2),
+  ach('maxed', 'Ausgereizt', 'Ein Upgrade auf Maximalstufe.', (g) => UPGRADES.some((u) => (g.s.upgrades[u.id] ?? 0) >= u.max)),
+  ach('top25', 'Aufsteiger', 'Top 25 der Rich List.', (g) => g.myRank() <= 25),
+  ach('nw10m', 'Zehnfacher Millionär', '10.000.000 € Vermögen.', (g) => g.netWorth() >= 1e7),
 ];
 
 const HW_NEWS: Record<HwMarket, { up: string[]; down: string[] }> = {
@@ -181,12 +213,14 @@ export interface BonusDef { id: string; icon: string; w: number; }
 export const BONUSES: BonusDef[] = [
   { id: 'cash', icon: '💶', w: 26 }, { id: 'coins', icon: '🪙', w: 20 }, { id: 'hash', icon: '⚡', w: 18 },
   { id: 'click', icon: '👆', w: 12 }, { id: 'cool', icon: '❄️', w: 10 }, { id: 'repair', icon: '🔧', w: 8 }, { id: 'pump', icon: '🚀', w: 6 },
+  { id: 'power', icon: '💡', w: 8 }, { id: 'part', icon: '📦', w: 6 },
 ];
 export const BOOST_INFO: Record<string, { name: string; icon: string; total: number }> = {
   hash: { name: 'Turbo ×2 Hash', icon: '⚡', total: 15 },
   click: { name: 'Klick ×10', icon: '👆', total: 20 },
   cool: { name: 'Kältefront −50 % Hitze', icon: '❄️', total: 30 },
   od: { name: 'Overdrive ×2 Hash', icon: '🔥', total: 20 },
+  power: { name: 'Gratis-Strom', icon: '💡', total: 25 },
 };
 /** Klicks bis zum Overdrive. */
 export const OD_MAX = 120;
@@ -513,6 +547,14 @@ export class Game {
         for (const r of ROOMS) if (s.rooms[r.id]) s.cond[r.id] = Math.min(100, (s.cond[r.id] ?? 100) + 30);
         msg = 'Alle Räume +30 % Zustand';
         break;
+      case 'part': {
+        const cap = Math.max(150, this.netWorth() * 0.03);
+        const list = PARTS.filter((p) => this.unlocked(p) && p.cost <= cap && p.cat !== 'case');
+        const p = list[Math.floor(Math.random() * list.length)] ?? partDef('ram8');
+        this.addPart(p.id, 1);
+        msg = `Gratis: ${p.brand} ${p.name}`;
+        break;
+      }
       case 'pump': {
         const list = COINS.filter((c) => this.coinUnlocked(c));
         const c = list[Math.floor(Math.random() * list.length)];
@@ -599,7 +641,7 @@ export class Game {
 
   /** Laufende Kosten (EUR/s) ohne Zinsen. Bei Stromausfall entfällt der Strom. */
   costPerSec(): number {
-    const power = this.s.ev?.id === 'outage' ? 0 : this.powerEurPerSec;
+    const power = this.s.ev?.id === 'outage' || this.boostOn('power') ? 0 : this.powerEurPerSec;
     return power + this.rentPerSec + this.salaryPerSec + this.premiumPerSec;
   }
 
@@ -618,6 +660,7 @@ export class Game {
     this.updateMarket(dt);
     this.updateEvents(dt);
     this.updateFlyer(dt);
+    this.updateDeal(dt);
     this.comboT += dt;
     if (this.comboT > 1.2 && this.combo > 0) this.combo = Math.max(0, this.combo - dt * 25);
 
@@ -642,7 +685,7 @@ export class Game {
       }
     }
 
-    const power = (this.s.ev?.id === 'outage' ? 0 : this.powerEurPerSec) * dt;
+    const power = (this.s.ev?.id === 'outage' || this.boostOn('power') ? 0 : this.powerEurPerSec) * dt;
     s.cash -= power + (this.rentPerSec + this.salaryPerSec + this.premiumPerSec) * dt;
     s.stats.powerSpent += power;
     s.stats.rentPaid += this.rentPerSec * dt;
@@ -756,6 +799,70 @@ export class Game {
     if (this.news.length > 8) this.news.pop();
     this.toast(`Börse: ${msg}`);
     this.fx(sell ? 'news-down' : 'news-up');
+  }
+
+  /** Mini-Event mit Entscheidung: Händler-Angebot oder Insider-Tipp. Immer nur eines, selten. */
+  deal: { kind: 'trade' | 'tip'; id: string; price: number; t: number; total: number; coin?: string } | null = null;
+  private dealTimer = 200;
+  private tipPending: { coin: string; up: boolean; pct: number; at: number } | null = null;
+
+  private updateDeal(dt: number) {
+    if (this.tipPending && this.s.playSec >= this.tipPending.at) {
+      const t = this.tipPending;
+      this.tipPending = null;
+      const c = coinDef(t.coin);
+      this.prices[c.id] = Math.min(c.base * 10, Math.max(c.base * 0.1, this.prices[c.id] * (t.up ? 1 + t.pct / 100 : 1 - t.pct / 100)));
+      if (t.up) this.s.stats.tipsWon++;
+      this.toast(t.up ? `Bonus: Insider-Tipp ging auf! ${c.name} +${t.pct} %` : `Der Tipp war ein Reinfall: ${c.name} −${t.pct} %`);
+      this.fx(t.up ? 'news-up' : 'news-down');
+      this.afterChange();
+    }
+    if (this.deal) {
+      this.deal.t -= dt;
+      if (this.deal.t <= 0) this.deal = null;
+      return;
+    }
+    this.dealTimer -= dt;
+    if (this.dealTimer > 0) return;
+    this.dealTimer = 180 + Math.random() * 180;
+    if (this.s.playSec < 300) return;
+    if (Math.random() < 0.55) {
+      const cap = Math.max(200, this.netWorth() * 0.15);
+      const list = PARTS.filter((p) => this.unlocked(p) && p.cost <= cap && p.cost >= 40);
+      const p = list[Math.floor(Math.random() * list.length)];
+      if (!p) return;
+      this.deal = { kind: 'trade', id: p.id, price: Math.max(1, Math.round(this.partPrice(p.id) * 0.6)), t: 30, total: 30 };
+    } else {
+      const list = COINS.filter((c) => this.coinUnlocked(c));
+      const c = list[Math.floor(Math.random() * list.length)];
+      this.deal = { kind: 'tip', id: 'tip', coin: c.id, price: Math.max(50, Math.round(this.netWorth() * 0.01)), t: 30, total: 30 };
+    }
+    this.fx('news-up');
+  }
+
+  /** Angebot annehmen (Teil kaufen oder Tipp bezahlen). */
+  takeDeal() {
+    const d = this.deal;
+    if (!d) return;
+    if (this.s.cash < d.price) { this.toast('Zu wenig Bargeld.'); return; }
+    this.s.cash -= d.price;
+    this.deal = null;
+    if (d.kind === 'trade') {
+      this.addPart(d.id, 1);
+      this.s.stats.deals++;
+      this.noteBargain(CATS[partDef(d.id).cat].market);
+      this.toast(`Bonus: Angebot gekauft – ${partDef(d.id).brand} ${partDef(d.id).name}`);
+    } else {
+      const up = Math.random() < 0.7;
+      this.tipPending = { coin: d.coin!, up, pct: up ? 12 + Math.floor(Math.random() * 14) : 8 + Math.floor(Math.random() * 8), at: this.s.playSec + 25 };
+      this.toast(`Tipp bezahlt: ${coinDef(d.coin!).name} – Ergebnis in 25 s`);
+    }
+    this.afterChange();
+  }
+
+  skipDeal() {
+    this.deal = null;
+    this.emit('change');
   }
 
   private updateFlyer(dt: number) {
@@ -1070,6 +1177,13 @@ export class Game {
 
   removeDraftGpu(idx: number) {
     this.s.draft.gpus.splice(idx, 1);
+    this.afterChange();
+  }
+
+  /** Eine Karte dieses Modells aus der Konfiguration entfernen (die zuletzt hinzugefügte). */
+  removeDraftGpuOf(id: string) {
+    const i = this.s.draft.gpus.lastIndexOf(id);
+    if (i >= 0) this.s.draft.gpus.splice(i, 1);
     this.afterChange();
   }
 
@@ -1465,7 +1579,7 @@ export class Game {
       research: [], researching: null, debt: 0, insured: false, mode: 'pool', autoSell: { on: false, min: 100 },
       mission: 0, ach: [], overheated: false, ev: null, prestige: { points: 0, resets: 0, lifetime: 0 },
       streak: { last: '', count: 0 }, tutorial: false,
-      stats: { events: 0, outages: 0, hacked: 0, blocks: 0, repairs: 0, loans: 0, repaid: 0, powerSpent: 0, rentPaid: 0, interestPaid: 0, clicks: 0, salaryPaid: 0, bonuses: 0, built: 0, bargains: 0, maxCombo: 0, overdrives: 0 },
+      stats: { events: 0, outages: 0, hacked: 0, blocks: 0, repairs: 0, loans: 0, repaid: 0, powerSpent: 0, rentPaid: 0, interestPaid: 0, clicks: 0, salaryPaid: 0, bonuses: 0, built: 0, bargains: 0, maxCombo: 0, overdrives: 0, deals: 0, tipsWon: 0 },
       netHistory: [], savedAt: Date.now(), active: 'kid',
     };
   }

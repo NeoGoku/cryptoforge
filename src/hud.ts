@@ -79,7 +79,7 @@ function drawLine(c: HTMLCanvasElement, pts: number[], color: string, fill = tru
   }
 }
 
-const QUIET = new Set(['shop-seg', 'shop-cat', 'draft-set', 'draft-none', 'draft-gpu-add', 'draft-gpu-rm', 'draft-gpu-fill', 'draft-clear', 'bp-save', 'bp-load', 'bp-del', 'bp-from', 'edit-m', 'place-m', 'unplace', 'draft-part', 'loan', 'daily', 'prestige', 'repair', 'insure', 'mode', 'room', 'room-coin', 'autosell', 'settings', 'tutorial', 'toggle']);
+const QUIET = new Set(['deal-skip', 'shop-seg', 'shop-cat', 'draft-set', 'draft-none', 'draft-gpu-add', 'draft-gpu-rm', 'draft-gpu-sub', 'draft-gpu-fill', 'draft-clear', 'bp-save', 'bp-load', 'bp-del', 'bp-from', 'edit-m', 'place-m', 'unplace', 'draft-part', 'loan', 'daily', 'prestige', 'repair', 'insure', 'mode', 'room', 'room-coin', 'autosell', 'settings', 'tutorial', 'toggle']);
 
 export class HUD {
   private tab: Tab = 'shop';
@@ -112,6 +112,7 @@ export class HUD {
     $('content').addEventListener('pointerdown', () => { this.pressed = true; });
     window.addEventListener('pointerup', () => { setTimeout(() => { this.pressed = false; }, 50); });
     $('dock').addEventListener('click', (e) => this.onAction(e));
+    $('deal').addEventListener('click', (e) => this.onAction(e));
     $('quest').addEventListener('click', () => { this.tab = 'tasks'; this.renderAll(); });
     $('reset').addEventListener('click', () => this.settingsModal());
     // Raum-Ansicht ein-/ausblenden
@@ -270,6 +271,7 @@ export class HUD {
       case 'draft-none': game.clearDraftPart(d.cat as PartCat); break;
       case 'draft-gpu-add': game.addDraftGpu(id); break;
       case 'draft-gpu-rm': game.removeDraftGpu(Number(d.i)); break;
+      case 'draft-gpu-sub': game.removeDraftGpuOf(id); break;
       case 'draft-gpu-fill': game.fillDraftGpu(id); break;
       case 'draft-clear': game.clearDraft(); break;
       case 'build': if (game.buildDraft(this.bpName)) this.bpName = ''; break;
@@ -292,6 +294,8 @@ export class HUD {
       case 'room-coin': game.setRoomCoin(id, d.coin ?? 'BIT'); break;
       case 'sell': game.sell(d.coin ?? 'BIT', Number(d.f)); break;
       case 'sell-all': game.sellAll(Number(d.f)); break;
+      case 'deal-take': game.takeDeal(); break;
+      case 'deal-skip': game.skipDeal(); break;
       case 'stake': game.stake(d.coin ?? 'BIT', Number(d.f)); break;
       case 'unstake': game.unstake(d.coin ?? 'BIT', 1); break;
       case 'mode': game.setMode(d.m as 'pool' | 'solo'); break;
@@ -444,14 +448,17 @@ export class HUD {
     };
     const gpuRow = () => {
       const max = st.maxGpu;
-      const inst = d.gpus.map((g, i) => `<button data-act="draft-gpu-rm" data-i="${i}" class="on" title="Entfernen">${shortName(partDef(g))} ✕</button>`).join('');
-      const add = PARTS.filter((p) => p.cat === 'gpu').map((p) => `<button data-act="draft-gpu-add" data-id="${p.id}" ${!max || d.gpus.length >= max ? 'disabled' : ''}>+ ${shortName(p)} <small>${(game.s.parts[p.id] ?? 0) ? `Lager ${game.s.parts[p.id]}` : eur(game.partPrice(p.id))}</small></button>`).join('');
+      const full = !max || d.gpus.length >= max;
+      const rows = PARTS.filter((p) => p.cat === 'gpu').map((p) => {
+        const n = d.gpus.filter((x) => x === p.id).length;
+        const have = game.s.parts[p.id] ?? 0;
+        return `<div class="gpurow"><div class="gi"><b>${p.brand} ${p.name}</b><small>${num(p.hash ?? 0)} H/s · ${num(p.watts ?? 0)} W · ${have ? `Lager ${have}` : eur(game.partPrice(p.id))}</small></div>
+          <div class="step ${n ? 'on' : ''}"><button data-act="draft-gpu-sub" data-id="${p.id}" ${n ? '' : 'disabled'}>−</button><b>${n}</b><button data-act="draft-gpu-add" data-id="${p.id}" ${full ? 'disabled' : ''}>+</button></div></div>`;
+      }).join('');
       const last = d.gpus[d.gpus.length - 1];
       return `<div class="wsrow"><div class="row"><span class="name">🎮 Grafikkarten</span><span class="muted">${d.gpus.length} / ${max || '–'} Plätze</span></div>
-        ${inst ? `<div class="chips">${inst}</div>` : ''}
-        <div class="chips">${add}</div>
-        ${last && d.gpus.length < max ? `<button style="margin-top:6px;width:100%" data-act="draft-gpu-fill" data-id="${last}">Restliche ${max - d.gpus.length} Plätze mit ${shortName(partDef(last))} füllen</button>` : ''}
-        ${!max ? '<div class="muted" style="margin-top:4px">Wähle zuerst Gehäuse und Mainboard.</div>' : ''}</div>`;
+        ${max ? rows : '<div class="muted" style="margin-top:4px">Wähle zuerst Gehäuse und Mainboard.</div>'}
+        ${max && last && d.gpus.length < max ? `<button style="margin-top:6px;width:100%" data-act="draft-gpu-fill" data-id="${last}">Restliche ${max - d.gpus.length} Plätze mit ${shortName(partDef(last))} füllen</button>` : ''}</div>`;
     };
     const { html, best } = this.coinLines(st);
     const loadRatio = st.cap ? st.dc / st.cap : 0;
@@ -842,6 +849,35 @@ export class HUD {
     else p.style.top = '';
   }
 
+  private dealKey = '';
+
+  /** Händler-Angebot / Insider-Tipp als Banner; Text nur bei neuem Angebot neu aufbauen. */
+  private renderDeal() {
+    const el = $('deal');
+    const d = game.deal;
+    if (!d) {
+      if (this.dealKey) { this.dealKey = ''; el.style.display = 'none'; el.innerHTML = ''; }
+      return;
+    }
+    const key = `${d.kind}${d.id}${d.coin ?? ''}${d.price}`;
+    if (key !== this.dealKey) {
+      this.dealKey = key;
+      el.style.display = '';
+      if (d.kind === 'trade') {
+        const p = partDef(d.id);
+        const reg = game.partPrice(d.id);
+        el.innerHTML = `<b>🚚 Händler-Angebot</b>${p.brand} ${p.name}<br><span class="muted">statt ${eur(reg)} nur ${eur(d.price)} (−40 %)</span><div class="track"><div class="fill" data-dealbar style="--b:var(--gold)"></div></div>
+          <div class="btns"><button class="buy" data-act="deal-take" data-cost="${d.price}">Kaufen · ${eur(d.price)}</button><button data-act="deal-skip">Nein danke</button></div>`;
+      } else {
+        const c = coinDef(d.coin!);
+        el.innerHTML = `<b>🕵️ Insider-Tipp</b>„${c.name} wird bald steigen.“<br><span class="muted">Kostet ${eur(d.price)}. Meist stimmt er, manchmal nicht.</span><div class="track"><div class="fill" data-dealbar style="--b:var(--gold)"></div></div>
+          <div class="btns"><button class="buy" data-act="deal-take" data-cost="${d.price}">Tipp kaufen · ${eur(d.price)}</button><button data-act="deal-skip">Ablehnen</button></div>`;
+      }
+    }
+    const bar = el.querySelector<HTMLElement>('[data-dealbar]');
+    if (bar) bar.style.width = `${(d.t / d.total) * 100}%`;
+  }
+
   private renderBoosts() {
     const html = Object.entries(BOOST_INFO).filter(([id]) => game.boostOn(id)).map(([id, b]) => {
       const left = game.boostLeft(id);
@@ -951,6 +987,7 @@ export class HUD {
     }
 
     this.renderBoosts();
+    this.renderDeal();
     const cv = game.clickBase() * game.comboMult() * (game.boostOn('click') ? 10 : 1);
     $('clickVal').textContent = `≈ ${eur(cv)}`;
 
