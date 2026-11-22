@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { game } from './game';
-import { DEFAULT_COIN, roomDef } from './config';
+import { coinDef, DEFAULT_COIN, roomDef } from './config';
 import { partDef } from './hardware';
 import type { RoomDef } from './config';
 import { sfx } from './audio';
@@ -218,7 +218,7 @@ export class MainScene extends Phaser.Scene {
     const dt = delta / 1000;
     game.update(dt);
     this.t += dt;
-    const powered = game.running();
+    const powered = game.running() && game.grid.throttle > 0;
     const w = this.scale.width;
     const h = this.scale.height;
     const g = this.dyn;
@@ -480,7 +480,8 @@ export class MainScene extends Phaser.Scene {
     // Objekte, nach Tiefe sortiert
     const led: LedFn = (x, y, c, phase) => this.ledPts.push({ x, y, c, phase });
     const items: { d: number; draw: () => void }[] = [];
-    for (const d of DECOR[room.id] ?? []) {
+    const decor = DECOR[room.id] ?? DECOR.dc.filter((d) => d.v < 2.1);
+    for (const d of decor) {
       items.push({ d: d.u + d.v + (d.du + d.dv) / 2, draw: () => drawDeco(g, d, led) });
       if (room.id === 'kid' && d.kind === 'chair') {
         const p = P(d.u + d.du / 2, d.v + d.dv / 2 + 0.1, 11);
@@ -499,7 +500,8 @@ export class MainScene extends Phaser.Scene {
     const poly = [P(u, v, 3), P(u + 1.2, v, 3), P(u + 1.2, v + 1.2, 3), P(u, v + 1.2, 3)];
     if (id && game.s.machines[id]) {
       const st = game.mstat(id);
-      const idle = !game.canMine(id, game.s.roomCoin[game.s.active] ?? DEFAULT_COIN);
+      const defaultCoin = coinDef(game.s.roomCoin[game.s.active] ?? DEFAULT_COIN);
+      const idle = !game.canMine(id, game.ops.rigCoin(id, defaultCoin).id);
       const led = idle ? 0x3a3f4f : hot ? 0xff6a3d : st.ledColor;
       const fan = (x: number, y: number, sc: number) => {
         g.fillStyle(0x10131c, 1);

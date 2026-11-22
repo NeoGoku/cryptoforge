@@ -36,6 +36,8 @@ export interface RoomDef {
   maxHeat: number;   // Hitzelimit, darüber Drosselung
   cost: number;
   rent: number;      // EUR/s
+  gridKw?: number;
+  gate?: { room: string; grid: number; tech: string };
   spots: [number, number][]; // Slot-Positionen (Kachelkoordinaten)
 }
 
@@ -52,6 +54,12 @@ export const ROOMS: RoomDef[] = [
   { id: 'basement', name: 'Keller', size: 10, maxHeat: 1100, cost: 40000, rent: 0.7, spots: grid(4, 2, 2.2, 3.6) },
   { id: 'hall', name: 'Industriehalle', size: 12, maxHeat: 2200, cost: 150000, rent: 1.6, spots: grid(4, 3, 3.0, 3.4) },
   { id: 'dc', name: 'Rechenzentrum', size: 14, maxHeat: 5200, cost: 600000, rent: 4, spots: grid(5, 4, 2.8, 3.2, 1.9, 1.9) },
+  { id: 'suite', name: 'Datacenter Suite', size: 15, maxHeat: 10000, cost: 1400000, rent: 7,
+    gridKw: 12, gate: { room: 'dc', grid: 4, tech: 'gridops' }, spots: grid(6, 4, 2, 3.1, 1.9, 2.1) },
+  { id: 'campus', name: 'Datacenter Campus', size: 17, maxHeat: 22000, cost: 4200000, rent: 14,
+    gridKw: 24, gate: { room: 'suite', grid: 7, tech: 'compression' }, spots: grid(7, 5, 2, 3.1, 1.9, 2.1) },
+  { id: 'megafarm', name: 'Mega-Farm Campus', size: 19, maxHeat: 48000, cost: 12000000, rent: 26,
+    gridKw: 44, gate: { room: 'campus', grid: 10, tech: 'orbital' }, spots: grid(8, 6, 2, 3.1, 1.9, 2.1) },
 ];
 
 export interface UpgradeDef {
@@ -105,6 +113,10 @@ export const TECHS: TechDef[] = [
   { id: 'immersion', name: 'Immersionskühlung', desc: 'Hitze −20 %, schaltet den Immersion Tank frei', cost: 6000, secs: 90, req: 'eff' },
   { id: 'quantum', name: 'Quantum-Hardware', desc: 'Schaltet Quantum Q1 frei', cost: 25000, secs: 180, req: 'immersion' },
   { id: 'fusion', name: 'Fusionskern', desc: 'Schaltet Fusion Core frei', cost: 120000, secs: 300, req: 'quantum' },
+  { id: 'gridops', name: 'Autonomous Grid', desc: 'Stromverbrauch −12 % und Datacenter Suite freischalten', cost: 58000, secs: 210, req: 'immersion' },
+  { id: 'compression', name: 'Hash Compression', desc: 'Coin-Produktion +18 % und Datacenter Campus freischalten', cost: 145000, secs: 300, req: 'gridops' },
+  { id: 'neural', name: 'Neural Mining', desc: 'Klickwert +45 % und AI Cluster freischalten', cost: 270000, secs: 360, req: 'compression' },
+  { id: 'orbital', name: 'Orbital Scheduling', desc: 'Hashrate +25 %, Orbital Forge und Mega-Farm freischalten', cost: 850000, secs: 480, req: 'fusion' },
 ];
 
 export const LOANS = [500, 2500, 10000, 50000];

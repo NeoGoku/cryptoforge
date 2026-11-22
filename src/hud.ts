@@ -6,11 +6,14 @@ import type { PartCat, PartDef, HwMarket, MachineStat } from './hardware';
 import { holderValue, shortAddr } from './world';
 import { sfx } from './audio';
 import { settings, saveSettings } from './settings';
+import { escapeHtml, isOpsTab, opsLink, performOpsAction, renderOperations } from './operations-ui';
+import type { OpsTab } from './operations-ui';
+import { SAVE_SLOTS, slotPreview } from './save-slots';
 
-type Tab = 'shop' | 'build' | 'inv' | 'market' | 'chain' | 'bank' | 'tech' | 'tasks' | 'ach' | 'rooms' | 'more';
+type Tab = 'shop' | 'build' | 'inv' | 'market' | 'chain' | 'bank' | 'tech' | 'tasks' | 'ach' | 'rooms' | 'ops' | 'more';
 const TABS: [Tab, string, string][] = [
   ['shop', '🛒', 'Shop'], ['build', '🛠️', 'Werkstatt'], ['inv', '🎒', 'Lager'], ['market', '📊', 'Markt'], ['chain', '🌐', 'Explorer'],
-  ['bank', '🏦', 'Bank'], ['tech', '🔬', 'Tech'], ['tasks', '🎯', 'Aufgaben'], ['ach', '🏆', 'Erfolge'], ['rooms', '🏠', 'Räume'], ['more', '⚙️', 'Mehr'],
+  ['ops', '⚡', 'Betrieb'], ['bank', '🏦', 'Bank'], ['tech', '🔬', 'Tech'], ['tasks', '🎯', 'Aufgaben'], ['ach', '🏆', 'Erfolge'], ['rooms', '🏠', 'Räume'], ['more', '⚙️', 'Mehr'],
 ];
 const KIND_NAME: Record<Kind, string> = { cpu: 'CPU', gpu: 'GPU', asic: 'ASIC', quantum: 'Quantum', fusion: 'Fusion' };
 const HW_LABEL: Record<HwMarket, string> = { gpu: 'GPUs', asic: 'ASICs', parts: 'PC-Teile' };
@@ -83,6 +86,7 @@ const QUIET = new Set(['deal-skip', 'shop-seg', 'shop-cat', 'draft-set', 'draft-
 
 export class HUD {
   private tab: Tab = 'shop';
+  private opsTab: OpsTab = 'grid';
   private shopSeg: 'parts' | 'pre' = 'parts';
   private shopCat: PartCat = 'gpu';
   private bpName = '';
@@ -105,12 +109,20 @@ export class HUD {
       }
     });
     $('content').addEventListener('click', (e) => this.onAction(e));
+    $('content').addEventListener('submit', (e) => this.submitOperation(e));
+    $('content').addEventListener('change', (e) => {
+      const select = e.target;
+      if (!(select instanceof HTMLSelectElement) || !select.dataset.opSelect) return;
+      game.ops.setTarget(select.dataset.rig ?? '', select.value || undefined, select.dataset.opSelect === 'secondary');
+    });
     $('content').addEventListener('input', (e) => {
       const t = e.target as HTMLInputElement;
       if (t.id === 'bpname') this.bpName = t.value;
     });
     $('content').addEventListener('pointerdown', () => { this.pressed = true; });
-    window.addEventListener('pointerup', () => { setTimeout(() => { this.pressed = false; }, 50); });
+    for (const event of ['pointerup', 'pointercancel']) {
+      window.addEventListener(event, () => { setTimeout(() => { this.pressed = false; }, 50); });
+    }
     $('dock').addEventListener('click', (e) => this.onAction(e));
     $('deal').addEventListener('click', (e) => this.onAction(e));
     $('quest').addEventListener('click', () => { this.tab = 'tasks'; this.renderAll(); });
@@ -128,16 +140,39 @@ export class HUD {
     new ResizeObserver(() => this.fitPanel()).observe($('dock'));
     window.addEventListener('resize', () => this.fitPanel());
     // Manuelles Minen über den Button (funktioniert auch bei ausgeblendetem Raum)
-    $('mineBtn').addEventListener('pointerdown', (e) => {
-      e.preventDefault();
+    const mine = $('mineBtn');
+    let holdTimer: number | undefined;
+    let repeatTimer: number | undefined;
+    const stopHolding = () => {
+      window.clearTimeout(holdTimer);
+      window.clearInterval(repeatTimer);
+      holdTimer = repeatTimer = undefined;
+    };
+    const mineOnce = (hold: boolean) => {
+      if ($('modal').style.display !== 'none' || document.hidden) { stopHolding(); return; }
       sfx.unlock();
-      const r = game.click();
+      const r = game.click(hold);
       sfx.click();
       if (r.crit) sfx.fx('crit');
-      const b = $('mineBtn').getBoundingClientRect();
+      const b = mine.getBoundingClientRect();
       const amt = r.amt < 0.01 ? r.amt.toFixed(5) : r.amt < 10 ? r.amt.toFixed(3) : r.amt.toFixed(1);
       this.floaty(b.left + b.width / 2 + (Math.random() - 0.5) * 30, b.top - 6, `${r.crit ? 'KRIT! ' : ''}+${amt} ${r.coin}`);
+    };
+    mine.addEventListener('pointerdown', (e) => {
+      if (!e.isPrimary || e.button !== 0) return;
+      e.preventDefault();
+      stopHolding();
+      mine.setPointerCapture(e.pointerId);
+      mineOnce(false);
+      holdTimer = window.setTimeout(() => {
+        repeatTimer = window.setInterval(() => mineOnce(true), 260);
+        mineOnce(true);
+      }, 420);
     });
+    mine.addEventListener('click', (e) => { if (e.detail === 0) mineOnce(false); });
+    for (const event of ['pointerup', 'pointercancel', 'lostpointercapture']) mine.addEventListener(event, stopHolding);
+    window.addEventListener('blur', stopHolding);
+    document.addEventListener('visibilitychange', stopHolding);
     const mute = $('mute');
     mute.textContent = sfx.isMuted() ? '🔇' : '🔊';
     mute.addEventListener('click', () => {
@@ -189,11 +224,11 @@ export class HUD {
       ['Coins & Hardware 📈', 'Jeder Coin braucht eine Mindest-Hashrate und den passenden Gerätetyp. Hardware-Preise schwanken mit dem Markt und mit News – kauf günstig, verkauf teuer.'],
       ['Aktiv minen ⛏️', 'Tippe in den Raum oder auf „Minen“: Jeder Klick bringt einen Anteil deiner Produktion. Schnelle Klicks bauen eine Combo bis ×3 auf, Krits geben ×8, und die Klickleiste lädt einen Overdrive mit doppelter Hashrate auf.'],
       ['Verkaufen & Kosten 💶', 'Verkaufe Coins im Dock unten. Achte auf Hitze, Strom und Miete. Das Netto oben zeigt, ob du Gewinn machst.'],
-      ['Mehr entdecken 🚀', 'Mehrere Münzen, Pool oder Solo, Kredite, Versicherung, Personal, Forschung, Events und Prestige warten auf dich. Missionen führen dich durch.'],
+      ['Betrieb & Stromnetz ⚡', 'Im Betriebsmenü stellst du Versorger und Akku ein, weist Crews zu und installierst Rig-Mods. Dort findest du auch das Zins-Wallet, Limit-Orders und zusätzliche Aufträge.'],
     ];
     const [t, p] = steps[step];
     const last = step === steps.length - 1;
-    const nickField = step === 0 ? `<label style="margin-top:10px"><span>Dein Nickname</span></label><input id="tnick" class="txt" maxlength="20" placeholder="z. B. HashKing" value="${game.s.nick}">` : '';
+    const nickField = step === 0 ? `<label style="margin-top:10px"><span>Dein Nickname</span></label><input id="tnick" class="txt" maxlength="20" placeholder="z. B. HashKing" value="${escapeHtml(game.s.nick)}">` : '';
     this.modal(`<h2>${t}</h2><p>${p}</p>${nickField}<div class="dots">${steps.map((_, i) => `<i class="${i === step ? 'on' : ''}"></i>`).join('')}</div>
       <div class="btns" style="margin-top:14px"><button id="tskip">Überspringen</button><button class="primary" id="tnext">${last ? 'Los geht’s' : 'Weiter'}</button></div>`, (m) => {
       const saveNick = () => { const i = m.querySelector<HTMLInputElement>('#tnick'); if (i && i.value.trim()) game.setNick(i.value); };
@@ -211,6 +246,11 @@ export class HUD {
       <label><span>Soundeffekte</span><b id="sv">${Math.round(settings.sfx * 100)} %</b></label><input type="range" id="sfxv" min="0" max="100" value="${settings.sfx * 100}">
       <div class="seg" style="margin-top:14px"><button data-q="high" class="${settings.quality === 'high' ? 'on' : ''}">Grafik hoch</button><button data-q="low" class="${settings.quality === 'low' ? 'on' : ''}">Grafik sparsam</button></div>
       <div class="seg"><button id="shake" class="${settings.shake ? 'on' : ''}">Bildschirm-Wackeln ${settings.shake ? 'an' : 'aus'}</button></div>
+      <label><span>Speicherplätze</span><b>Platz ${game.slot} aktiv</b></label>
+      <div class="btns">${SAVE_SLOTS.map((slot) => {
+        const preview = slotPreview(slot);
+        return `<button data-slot="${slot}" ${slot === game.slot ? 'disabled' : ''}>${slot} · ${preview ? escapeHtml(preview.nick || eur(preview.cash)) : 'Neu'}</button>`;
+      }).join('')}</div>
       <label><span>Spielstand sichern (Code)</span></label><textarea id="exp" readonly>${code}</textarea>
       <div class="btns"><button id="copy">Code kopieren</button></div>
       <label><span>Spielstand laden</span></label><textarea id="imp" placeholder="Code hier einfügen"></textarea>
@@ -224,6 +264,11 @@ export class HUD {
       m.querySelectorAll<HTMLElement>('[data-q]').forEach((b) => b.addEventListener('click', () => { settings.quality = b.dataset.q as 'high' | 'low'; saveSettings(); this.settingsModal(); }));
       q('#shake').addEventListener('click', () => { settings.shake = !settings.shake; saveSettings(); this.settingsModal(); });
       q('#copy').addEventListener('click', () => { void navigator.clipboard?.writeText(code); this.toast('Code kopiert.'); });
+      for (const slot of SAVE_SLOTS) {
+        m.querySelector(`[data-slot="${slot}"]`)?.addEventListener('click', () => {
+          if (!game.switchSlot(slot)) this.toast('Speicherplatz konnte nicht geöffnet werden.');
+        });
+      }
       q('#doimp').addEventListener('click', () => { if (!game.importSave((q('#imp') as HTMLTextAreaElement).value)) this.toast('Kein gültiger Code.'); });
       q('#tut').addEventListener('click', () => this.tutorial(0));
       q('#nick').addEventListener('change', (e) => { game.setNick((e.target as HTMLInputElement).value); this.toast('Nickname gespeichert.'); });
@@ -237,12 +282,26 @@ export class HUD {
     const gain = game.prestigeGain();
     const can = game.canPrestige();
     this.modal(`<h2>Prestige-Neustart ✨</h2>
-      <p>Du startest von vorn (Miner, Teile, Räume, Geld, Forschung werden zurückgesetzt). Erfolge, Serie und Forge-Punkte bleiben. Jeder Punkt gibt dauerhaft <b>+5 % Hash und Klickertrag</b>.</p>
+      <p>Du startest von vorn (Miner, Teile, Räume, Geld, Forschung werden zurückgesetzt). Erfolge, Serie, Forge-Punkte, Chips und Skills bleiben. Neue Forge-Punkte bringen je einen Chip. Jeder Punkt gibt dauerhaft <b>+5 % Hash und Klickertrag</b>.</p>
       ${kv('Aktuelle Punkte', `${game.s.prestige.points}`)}${kv('Neue Punkte durch Neustart', `+${Math.max(0, gain)}`)}${kv('Vermögen', `${eur(game.netWorth())} / 20.000 €`)}
       <div class="btns" style="margin-top:14px"><button id="no">Abbrechen</button><button class="primary" id="yes" ${can ? '' : 'disabled'}>Neustart</button></div>`, (m) => {
       m.querySelector('#no')!.addEventListener('click', () => this.closeModal());
       m.querySelector('#yes')!.addEventListener('click', () => { this.closeModal(); game.doPrestige(); });
     });
+  }
+
+  private submitOperation(e: SubmitEvent) {
+    const form = e.target;
+    if (!(form instanceof HTMLFormElement) || !form.dataset.opForm) return;
+    e.preventDefault();
+    const data = new FormData(form, e.submitter);
+    const coin = String(data.get('coin') ?? '');
+    const amount = Number(data.get('amount'));
+    if (form.dataset.opForm === 'order') {
+      game.ops.placeOrder(coin, data.get('side') === 'sell' ? 'sell' : 'buy', amount, Number(data.get('limit')));
+    } else if (e.submitter) {
+      game.ops.transfer(coin, amount, data.get('direction') === 'withdraw');
+    }
   }
 
   // ---- Aktionen ----
@@ -260,6 +319,22 @@ export class HUD {
       case 'buy-part': game.buyPart(id); break;
       case 'sell-part': game.sellPart(id); break;
       case 'buy-pre': game.buyPrebuilt(id); break;
+      case 'lease-pre': game.buyPrebuilt(id, true); break;
+      case 'open-ops':
+        if (isOpsTab(id)) {
+          this.opsTab = id;
+          this.tab = 'ops';
+          this.renderAll();
+          $('content').scrollTop = 0;
+        }
+        break;
+      case 'ops':
+        if (d.op === 'tab' && isOpsTab(id)) {
+          this.opsTab = id;
+          this.renderContent();
+          $('content').scrollTop = 0;
+        } else if (d.op) performOpsAction(game, d.op, id);
+        break;
       case 'draft-part': {
         const p = partDef(id);
         if (p.cat === 'gpu') game.addDraftGpu(id); else game.setDraftPart(p.cat, id);
@@ -317,6 +392,8 @@ export class HUD {
   }
 
   private renderAll() {
+    document.body.classList.toggle('operations-open', this.tab === 'ops');
+    this.fitPanel();
     this.renderTabs();
     this.renderContent();
     this.renderRooms();
@@ -343,6 +420,7 @@ export class HUD {
     const scroll = el.scrollTop;
     let h = '';
     switch (this.tab) {
+      case 'ops': h = renderOperations(game, this.opsTab); break;
       case 'shop': h = this.shop(); break;
       case 'build': h = this.workshop(); break;
       case 'chain': h = this.explorer(); break;
@@ -355,7 +433,22 @@ export class HUD {
       case 'ach': h = this.achievements(); break;
       case 'more': h = this.more(); break;
     }
+    const forms = new Map(Array.from(el.querySelectorAll<HTMLFormElement>('form[data-op-form]'), (form) => [
+      form.dataset.opForm, new Map(Array.from(form.querySelectorAll<HTMLInputElement | HTMLSelectElement>('input:not([type=hidden]), select'), (field) => [field.name, field.value])),
+    ]));
+    const focus = document.activeElement;
+    const focusForm = focus instanceof HTMLInputElement || focus instanceof HTMLSelectElement ? focus.form?.dataset.opForm : undefined;
+    const focusName = focusForm && focus instanceof HTMLElement ? focus.getAttribute('name') : null;
     el.innerHTML = h;
+    for (const form of el.querySelectorAll<HTMLFormElement>('form[data-op-form]')) {
+      const values = forms.get(form.dataset.opForm);
+      if (!values) continue;
+      for (const field of form.querySelectorAll<HTMLInputElement | HTMLSelectElement>('input:not([type=hidden]), select')) {
+        const value = values.get(field.name);
+        if (value !== undefined && (!(field instanceof HTMLSelectElement) || Array.from(field.options).some((option) => option.value === value))) field.value = value;
+        if (focusForm === form.dataset.opForm && focusName === field.name) field.focus({ preventScroll: true });
+      }
+    }
     el.scrollTop = scroll;
   }
 
@@ -401,6 +494,7 @@ export class HUD {
       return h + PREBUILT.map((p) => {
         const locked = !game.unlocked(p);
         const cost = game.prePrice(p.id);
+        const lease = game.ops.leaseQuote(p.id);
         const st: MachineStat = { name: p.name, kind: p.kind, model: p.model, hash: p.hash, watts: p.watts, heat: p.heat, color: p.color, ledColor: p.ledColor, gpus: [], maxGpu: 0 };
         const { html, best } = this.coinLines(st);
         return `<div class="card ${locked ? 'lock' : ''}" style="--c:${hex(p.ledColor)}">
@@ -410,6 +504,7 @@ export class HUD {
           ${locked ? `<div class="lockmsg">🔒 Erforsche „${techDef(p.unlock!).name}“.</div>` : ''}
           <div class="row"><span class="roi">${best > 0 ? `<span class="good">Amortisation ca. ${num(cost / best / 60, 1)} min</span>` : '<span class="bad">Aktuell unrentabel</span>'}<br><span class="muted">Netto €/s: ${html}</span></span>
             <button class="buy" data-act="buy-pre" data-id="${p.id}" data-ppre="${p.id}" data-cost="${cost}" data-locked="${locked || full ? 1 : 0}" ${locked || full ? 'disabled' : ''}>${eur(cost)}</button></div>
+          <div class="btns"><button data-act="lease-pre" data-id="${p.id}" data-lease="${p.id}" data-cost="${lease.deposit}" data-locked="${locked || full ? 1 : 0}" ${locked || full || game.s.cash < lease.deposit ? 'disabled' : ''}>Leasing · ${eur(lease.deposit)} + 3 × ${eur(lease.payment)}</button></div>
         </div>`;
       }).join('');
     }
@@ -488,7 +583,7 @@ export class HUD {
     h += game.s.blueprints.length ? game.s.blueprints.map((bp) => {
       const bs = buildStats(bp.build);
       const mc = game.missingCost(bp.build).cost;
-      return `<div class="card" style="--c:${hex(bs.ledColor)}"><div class="head">${machineIcon(bs)}<div style="flex:1"><div class="name">${bp.name}</div><div class="muted">${num(bs.hash, 1)} H/s · ${num(bs.watts)} W · Hitze ${num(bs.heat, 1)}</div></div></div>
+      return `<div class="card" style="--c:${hex(bs.ledColor)}"><div class="head">${machineIcon(bs)}<div style="flex:1"><div class="name">${escapeHtml(bp.name)}</div><div class="muted">${num(bs.hash, 1)} H/s · ${num(bs.watts)} W · Hitze ${num(bs.heat, 1)}</div></div></div>
         <div class="btns"><button class="buy" data-act="bp-build" data-id="${bp.id}" data-cost="${mc}">Bauen · ${eur(mc)}</button><button data-act="bp-load" data-id="${bp.id}">Laden</button><button data-act="bp-del" data-id="${bp.id}">🗑</button></div></div>`;
     }).join('') : '<div class="muted" style="padding:6px 2px">Noch keine Blueprints. Speichere eine gültige Konfiguration.</div>';
     return h;
@@ -503,10 +598,10 @@ export class HUD {
       const m = game.s.machines[id];
       const st = game.mstat(id);
       const parts = m.build ? [...Object.values(m.build.parts).map((p) => shortName(partDef(p!))), m.build.gpus.length ? `${m.build.gpus.length}× GPU` : ''].filter(Boolean).join(' · ') : prebuiltDef(m.pre!).brand;
-      return `<div class="card" style="--c:${hex(st.ledColor)}"><div class="head">${machineIcon(st)}<div style="flex:1"><div class="name">${m.name}</div><div class="muted">${num(st.hash, 1)} H/s · ${num(st.watts)} W · Hitze ${num(st.heat, 1)} · ${KIND_NAME[st.kind]}</div><div class="muted" style="font-size:11px">${parts}</div></div></div>
+      return `<div class="card" style="--c:${hex(st.ledColor)}"><div class="head">${machineIcon(st)}<div style="flex:1"><div class="name">${escapeHtml(m.name)}</div><div class="muted">${num(st.hash, 1)} H/s · ${num(st.watts)} W · Hitze ${num(st.heat, 1)} · ${KIND_NAME[st.kind]}</div><div class="muted" style="font-size:11px">${parts}</div></div></div>
         <div class="btns">${placed ? `<button data-act="unplace" data-id="${id}">Ins Lager</button>` : `<button class="primary" data-act="place-m" data-id="${id}" ${free === 0 ? 'disabled' : ''}>Aufstellen</button>`}
         ${m.build ? `<button data-act="edit-m" data-id="${id}">Bearbeiten</button><button data-act="bp-from" data-id="${id}">💾</button>${placed ? '' : `<button data-act="dismantle" data-id="${id}">Zerlegen</button>`}` : ''}
-        ${placed ? '' : `<button data-act="sell-m" data-id="${id}">Verk. ${eur(game.machineSellValue(m))}</button>`}</div></div>`;
+        ${game.s.ops.leases[id] ? opsLink('rigs', 'Leasing verwalten') : placed ? '' : `<button data-act="sell-m" data-id="${id}">Verk. ${eur(game.machineSellValue(m))}</button>`}</div></div>`;
     };
     let h = `<div class="sect">${room.name} · ${slots.length - free}/${slots.length} Slots belegt · ${game.totalGadgets()}/${game.maxGadgets()} Miner gesamt</div>
       <button class="primary" style="width:100%;margin-bottom:10px" data-act="place" ${free === 0 || loose.length === 0 ? 'disabled' : ''}>Besten Miner aufstellen</button>`;
@@ -552,7 +647,7 @@ export class HUD {
 
   private market(): string {
     const solo = game.s.mode === 'solo';
-    let h = `<div class="seg"><button data-act="mode" data-m="pool" class="${!solo ? 'on' : ''}">⛏️ Pool</button><button data-act="mode" data-m="solo" class="${solo ? 'on' : ''}">🎰 Solo</button></div>
+    let h = `<div class="btns" style="margin-bottom:8px">${opsLink('treasury', 'Zins-Wallet & Limit-Orders')}${opsLink('traders')}</div><div class="seg"><button data-act="mode" data-m="pool" class="${!solo ? 'on' : ''}">⛏️ Pool</button><button data-act="mode" data-m="solo" class="${solo ? 'on' : ''}">🎰 Solo</button></div>
       <div class="muted" style="margin:-4px 2px 10px">${solo ? 'Solo: Blockfunde alle ca. 25 s, im Schnitt +12 % Ertrag, aber unregelmäßig.' : `Pool: stetiger Ertrag, ${Math.round(POOL_FEE * 100)} % Gebühr.`}</div>`;
     if (game.news.length) {
       h += `<div class="card" style="--c:#3a4a7a"><div class="row"><span class="name">📰 Börsen-News</span></div>${game.news.map((n) => `<div class="muted" style="margin-top:4px"><span class="${n.up ? 'good' : 'bad'}">${n.up ? '▲' : '▼'}</span> ${n.msg} <span style="opacity:.6">· vor ${dur((Date.now() - n.at) / 1000)}</span></div>`).join('')}</div>`;
@@ -563,26 +658,29 @@ export class HUD {
       const chg = (game.prices[c.id] / hs[0] - 1) * 100;
       const w = game.s.wallet[c.id] ?? 0;
       const st = game.s.staked[c.id] ?? 0;
-      const value = (w + st) * game.prices[c.id];
+      const reserved = game.s.ops.treasury[c.id]?.amount ?? 0;
+      const listed = game.s.ops.orders.filter((o) => o.side === 'sell' && o.coin === c.id).reduce((n, o) => n + o.amount, 0);
+      const value = (w + st + reserved + listed) * game.prices[c.id];
       h += `<div class="card ${locked ? 'lock' : ''}" style="--c:${c.color}">
         <div class="row"><span class="name"><span style="color:${c.color}">●</span> ${c.name} <span class="muted">${c.id}</span></span>
           <span><b>${game.prices[c.id] < 10 ? num(game.prices[c.id], 2) : num(game.prices[c.id], 1)} €</b> <span class="${chg >= 0 ? 'good' : 'bad'}" style="font-size:11px">${chg >= 0 ? '▲' : '▼'} ${num(Math.abs(chg), 1)} %</span></span></div>
         <div class="muted">${c.desc}</div>
         <div class="muted" style="margin-top:3px">⛏️ Min. ${num(c.minHash)} H/s je Gerät · Algorithmus für: ${(Object.keys(KIND_NAME) as Kind[]).filter((k) => c.mult[k] > 0).map((k) => KIND_NAME[k]).join(', ')}</div>
         ${locked ? `<div class="lockmsg">🔒 Erforsche „${techDef(c.unlock!).name}“.</div>` : `<canvas class="mini" data-coin="${c.id}"></canvas>
-        ${kv('Wallet', `${num(w, 4)} ${c.id}`)}${kv('Gestaked (+0,25 %/min)', `${num(st, 4)} ${c.id}`)}${kv('Wert gesamt', eur(value))}
+        ${kv('Frei verfügbar', `${num(w, 4)} ${c.id}`)}${reserved || listed ? kv('Zins-Wallet / Orders', `${num(reserved, 4)} / ${num(listed, 4)} ${c.id}`) : ''}${kv('Gestaked (+0,25 %/min)', `${num(st, 4)} ${c.id}`)}${kv('Wert gesamt', eur(value))}
         <div class="btns">
           <button data-act="sell" data-coin="${c.id}" data-f="0.5" ${w < 1e-6 ? 'disabled' : ''}>50 % verk.</button>
           <button class="primary" data-act="sell" data-coin="${c.id}" data-f="1" ${w < 1e-6 ? 'disabled' : ''}>Alles verk.</button>
           <button data-act="stake" data-coin="${c.id}" data-f="1" ${w < 1e-6 ? 'disabled' : ''}>Staken</button>
           <button data-act="unstake" data-coin="${c.id}" ${st < 1e-6 ? 'disabled' : ''}>Abheben</button>
+          ${game.has('auto') ? `<button data-act="ops" data-op="auto-coin" data-id="${c.id}" aria-pressed="${game.s.ops.autoCoins[c.id] !== false}">Auto-Verkauf ${game.s.ops.autoCoins[c.id] === false ? 'aus' : 'an'}</button>` : ''}
         </div>`}
       </div>`;
     }
     if (game.has('auto')) {
       const a = game.s.autoSell;
       h += `<div class="card" style="--c:var(--acc)"><div class="row"><span class="name">🤖 Auto-Verkauf</span><button data-act="autosell" data-on="${a.on ? 0 : 1}" data-min="${a.min}" class="${a.on ? 'on' : ''}">${a.on ? 'An' : 'Aus'}</button></div>
-        <div class="muted">Verkauft alle Coins, sobald ihr Wert den Schwellwert erreicht.</div>
+        <div class="muted">Verkauft ausgewählte freie Coins ab dem eingestellten Gesamtwert.</div>
         <div class="chips">${[50, 200, 1000, 5000].map((m) => `<button data-act="autosell" data-on="${a.on ? 1 : 0}" data-min="${m}" class="${a.min === m ? 'on' : ''}">ab ${num(m)} €</button>`).join('')}</div></div>`;
     }
     return h;
@@ -602,6 +700,7 @@ export class HUD {
         <div class="btns"><button data-act="repay" data-f="0.25" ${s.debt <= 0 ? 'disabled' : ''}>25 % tilgen</button><button data-act="repay" data-f="0.5" ${s.debt <= 0 ? 'disabled' : ''}>50 %</button><button class="primary" data-act="repay" data-f="1" ${s.debt <= 0 ? 'disabled' : ''}>Alles tilgen</button></div>
         <div class="muted" style="margin-top:6px">Zinsen wachsen auf die Schuld. Offline fallen Zinsen höchstens 30 Minuten an.</div>
       </div>
+      <div class="btns">${opsLink('grid')}${opsLink('rigs', 'Leasing verwalten')}</div>
       ${title('Versicherung')}
       <div class="card" style="--c:${s.insured ? 'var(--acc)' : '#3a4a7a'}">
         <div class="row"><span class="name">🛡️ Geräteversicherung</span><button data-act="insure" class="${s.insured ? 'on' : ''}">${s.insured ? 'Aktiv' : 'Abschließen'}</button></div>
@@ -610,7 +709,7 @@ export class HUD {
       ${title('Laufende Bilanz (€/s)')}
       <div class="card" style="--c:var(--gold)"><div class="bars">
         ${bar('Einnahmen', income, maxBar, `+${num(income, 3)}`, '#7ee787')}
-        ${bar('Strom', game.s.ev?.id === 'outage' ? 0 : game.powerEurPerSec, maxBar, `−${num(game.s.ev?.id === 'outage' ? 0 : game.powerEurPerSec, 3)}`, '#ffc857')}
+        ${bar('Strom', game.gridCostPerSec(), maxBar, `−${num(game.gridCostPerSec(), 3)}`, '#ffc857')}
         ${bar('Miete', game.rentPerSec, maxBar, `−${num(game.rentPerSec, 3)}`, '#8c7bff')}
         ${bar('Personal', game.salaryPerSec, maxBar, `−${num(game.salaryPerSec, 3)}`, '#4fd1c5')}
         ${bar('Versich.', game.premiumPerSec, maxBar, `−${num(game.premiumPerSec, 3)}`, '#5ad1ff')}
@@ -666,7 +765,7 @@ export class HUD {
 
   private tasks(): string {
     const ready = game.dailyReady();
-    let h = `<div class="card" style="--c:${ready ? 'var(--gold)' : '#3a4a7a'}"><div class="row"><span class="name">📅 Tagesbonus</span>
+    let h = `<div class="btns" style="margin-bottom:8px">${opsLink('tasks', 'Tages-Challenges, Weeklies & Projekte')}</div><div class="card" style="--c:${ready ? 'var(--gold)' : '#3a4a7a'}"><div class="row"><span class="name">📅 Tagesbonus</span>
       <button class="buy" data-act="daily" ${ready ? '' : 'disabled'}>${ready ? `+${num(game.dailyReward())} €` : 'Morgen wieder'}</button></div>
       <div class="muted" style="margin-top:3px">Serie: ${game.s.streak.count} Tag(e). Je länger die Serie (bis 7), desto größer der Bonus.</div></div>`;
     h += title('Missionen');
@@ -699,9 +798,10 @@ export class HUD {
     return ROOMS.map((r) => {
       const owned = !!game.s.rooms[r.id];
       const active = game.s.active === r.id;
+      const requirement = game.roomRequirement(r.id);
       if (!owned) {
-        return `<div class="card lock" style="--c:#3a4a7a"><div class="row"><span class="name">🔒 ${r.name}</span><button class="buy" data-act="buy-room" data-id="${r.id}" data-cost="${r.cost}">${eur(r.cost)}</button></div>
-          <div class="bars">${bar('Slots', r.spots.length, 20, `${r.spots.length}`, '#8c7bff')}${bar('Kühlung', r.maxHeat, 5200, num(r.maxHeat), '#4fd1c5')}</div>${kv('Miete', `${num(r.rent, 2)} €/s`)}</div>`;
+        return `<div class="card lock" style="--c:#3a4a7a"><div class="row"><span class="name">🔒 ${r.name}</span><button class="buy" data-act="buy-room" data-id="${r.id}" data-cost="${r.cost}" data-locked="${requirement ? 1 : 0}">${eur(r.cost)}</button></div>
+          ${requirement ? `<div class="lockmsg">Benötigt: ${requirement}</div>` : ''}<div class="bars">${bar('Slots', r.spots.length, 20, `${r.spots.length}`, '#8c7bff')}${bar('Kühlung', r.maxHeat, 5200, num(r.maxHeat), '#4fd1c5')}</div>${kv('Miete', `${num(r.rent, 2)} €/s`)}</div>`;
       }
       const cond = game.s.cond[r.id] ?? 100;
       const rc = game.repairCost(r.id);
@@ -722,8 +822,9 @@ export class HUD {
     const st = s.stats;
     const p = s.prestige;
     return `${title('Vermögen')}<div class="card" style="--c:var(--gold)">${kv('Vermögen gesamt', `<b>${eur(game.netWorth())}</b>`)}<canvas class="mini" id="netchart" style="height:70px"></canvas>
-        ${kv('Geräte (60 %)', eur(game.gadgetValue() * 0.6))}${kv('Coins', eur(game.coinValue()))}${kv('Bargeld', eur(s.cash))}${kv('Schulden', eur(s.debt))}</div>
+        ${kv('Geräte (60 %)', eur(game.gadgetValue() * 0.6))}${kv('Coins', eur(game.coinValue()))}${kv('Bargeld', eur(s.cash))}${kv('Für Orders reserviert', eur(game.ops.orderCash))}${kv('Schulden', eur(s.debt))}</div>
       ${title('Prestige')}
+      <div class="btns" style="margin-bottom:8px">${opsLink('meta', 'Sammlungen, Skilltree & Chip-Shop')}</div>
       <div class="card" style="--c:#c88bff"><div class="row"><span class="name">✨ Forge-Punkte: ${p.points}</span><span class="tag" style="--c:#c88bff">+${num(p.points * 5)} %</span></div>
         <div class="muted" style="margin:4px 0">Neustart gibt dauerhaft +5 % Hash und Klickertrag je Punkt. Benötigt 20.000 € Vermögen. Mögliche neue Punkte: <b>+${Math.max(0, game.prestigeGain())}</b></div>
         <button class="primary" style="width:100%" data-act="prestige" ${game.canPrestige() ? '' : 'disabled'}>Neustart planen</button></div>
@@ -751,7 +852,7 @@ export class HUD {
       const n = slots.filter(Boolean).length;
       return `<button class="chip glass ${r.id === game.s.active ? 'on' : ''}" data-act="room" data-id="${r.id}">🏠 ${r.name} <small>${n}/${slots.length}</small></button>`;
     });
-    if (next) chips.push(`<button class="chip glass buy" data-act="buy-room" data-id="${next.id}" data-cost="${next.cost}">＋ ${next.name} · ${eur(next.cost)}</button>`);
+    if (next && !game.roomRequirement(next.id)) chips.push(`<button class="chip glass buy" data-act="buy-room" data-id="${next.id}" data-cost="${next.cost}">＋ ${next.name} · ${eur(next.cost)}</button>`);
     const i = owned.findIndex((r) => r.id === game.s.active);
     const prev = owned[(i - 1 + owned.length) % owned.length].id;
     const nxt = owned[(i + 1) % owned.length].id;
@@ -845,7 +946,9 @@ export class HUD {
   /** Mobil ohne Raum: Panel direkt unter dem Dock beginnen lassen. */
   private fitPanel() {
     const p = $('panel');
-    if (!settings.scene && window.innerWidth < 900) p.style.top = `${Math.round($('dock').getBoundingClientRect().bottom + 6)}px`;
+    const mobileOps = this.tab === 'ops' && window.innerWidth < 900;
+    $('dock').style.top = mobileOps ? `${Math.ceil($('top').getBoundingClientRect().bottom + 6)}px` : '';
+    if (mobileOps || (!settings.scene && window.innerWidth < 900)) p.style.top = `${Math.round($('dock').getBoundingClientRect().bottom + 6)}px`;
     else p.style.top = '';
   }
 
@@ -962,6 +1065,14 @@ export class HUD {
         const c = game.prePrice(b.dataset.ppre!);
         if (Number(b.dataset.cost) !== c) { b.dataset.cost = String(c); if (!b.querySelector('.old')) b.textContent = eur(c); }
       });
+      document.querySelectorAll<HTMLElement>('[data-lease]').forEach((b) => {
+        const quote = game.ops.leaseQuote(b.dataset.lease!);
+        if (Number(b.dataset.cost) !== quote.deposit || b.dataset.payment !== String(quote.payment)) {
+          b.dataset.cost = String(quote.deposit);
+          b.dataset.payment = String(quote.payment);
+          b.textContent = `Leasing · ${eur(quote.deposit)} + 3 × ${eur(quote.payment)}`;
+        }
+      });
       document.querySelectorAll<HTMLElement>('[data-hwv]').forEach((b) => {
         const v = game.hw[b.dataset.hwv as HwMarket];
         b.textContent = `${num(v * 100)} %`;
@@ -973,6 +1084,10 @@ export class HUD {
       this.liveT = 0;
       this.renderContent();
       this.drawMinis();
+    }
+    if (this.tab === 'ops' && this.liveT >= 1.5 && !this.pressed && !$('content').contains(document.activeElement?.closest('input,select') ?? null)) {
+      this.liveT = 0;
+      this.renderContent();
     }
 
     // Forschung: Fortschritt
@@ -1001,7 +1116,7 @@ export class HUD {
       fill.className = `fill ${ratio >= 1 ? 'hot' : ratio > 0.7 ? 'warn' : 'ok'}`;
       $('roomName').innerHTML = `<b>${room.name}</b>`;
       $('heatTxt').textContent = `Hitze ${num(st.heat)} / ${num(st.limit)}${st.throttle < 1 ? ` · gedrosselt ${num(st.throttle * 100)} %` : ''}`;
-      $('roomSub').innerHTML = `${num(st.hash)} H/s · ${num(st.power)} W · Zustand ${num(st.cond)} % · ${coin}${st.idle ? ` · <span class="bad">${st.idle} Gerät(e) zu schwach für ${coin}</span>` : ''}`;
+      $('roomSub').innerHTML = `${num(st.hash)} H/s · ${num(st.power)} W · Zustand ${num(st.cond)} % · ${coin}${st.idle ? ` · <span class="bad">${st.idle} Gerät(e) ohne passenden Coin</span>` : ''}`;
     }
     const total = game.coinValue() - COINS.reduce((a, c) => a + (game.s.staked[c.id] ?? 0) * game.prices[c.id], 0);
     $('sell50').textContent = `50 % · ${eur(total * 0.5)}`;

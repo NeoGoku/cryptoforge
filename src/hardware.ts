@@ -109,6 +109,9 @@ export const PREBUILT: PrebuiltDef[] = [
   { id: 'hydro', brand: 'Helix Forge', name: 'HF-Titan 21 Hydro', kind: 'asic', model: 'asic', hash: 2200, watts: 5200, heat: 240, cost: 16500, color: 0x4a7bb0, ledColor: 0x7ab8ff, desc: 'Wassergekühlter Industrie-ASIC. Wenig Hitze je Hash.' },
   { id: 'qpu', brand: 'Qorvane', name: 'Quantum Q1', kind: 'quantum', model: 'quantum', hash: 3600, watts: 9000, heat: 520, cost: 40000, color: 0x3a8fb8, ledColor: 0x7af5ff, unlock: 'quantum', desc: 'Experimenteller Quantenrechner. Mint Qubit.' },
   { id: 'fusion', brand: 'Solarc', name: 'Fusion Core', kind: 'fusion', model: 'fusion', hash: 18000, watts: 22000, heat: 900, cost: 200000, color: 0xb04a8c, ledColor: 0xff7ac8, unlock: 'fusion', desc: 'Miniatur-Fusionsreaktor. Mint Helion.' },
+  { id: 'hv-usb', brand: 'Hashvault', name: 'USB Miner', kind: 'asic', model: 'asic', hash: 22, watts: 74, heat: 9, cost: 280, color: 0x4d6974, ledColor: 0x4fd1c5, desc: 'Kompakter Einstieg in Etra-Mining mit niedrigem Verbrauch.' },
+  { id: 'hv-ai', brand: 'Hashvault', name: 'AI Cluster', kind: 'quantum', model: 'quantum', hash: 18000, watts: 15500, heat: 900, cost: 320000, color: 0x4c5691, ledColor: 0xa699ff, unlock: 'neural', desc: 'Optimierte Rechenkerne für Etra, Luxar und Qubit.' },
+  { id: 'hv-orbital', brand: 'Hashvault', name: 'Orbital Forge', kind: 'fusion', model: 'fusion', hash: 78000, watts: 28000, heat: 1900, cost: 1550000, color: 0x52467e, ledColor: 0xdf9fff, unlock: 'orbital', desc: 'Fusions-Cluster mit hoher Parallellast für Helion.' },
 ];
 
 export interface Build {
