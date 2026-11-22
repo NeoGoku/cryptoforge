@@ -976,7 +976,11 @@ export class Game {
     return m;
   }
 
+  /** true während Reset/Import: verhindert, dass beforeunload den alten Stand zurückschreibt. */
+  private noSave = false;
+
   save() {
+    if (this.noSave) return;
     this.s.savedAt = Date.now();
     try {
       localStorage.setItem(SAVE_KEY, JSON.stringify(this.s));
@@ -994,6 +998,7 @@ export class Game {
     try {
       const d = JSON.parse(atob(code.trim()));
       if (!this.migrate(d)) return false;
+      this.noSave = true;
       localStorage.setItem(SAVE_KEY, JSON.stringify(d));
       location.reload();
       return true;
@@ -1003,6 +1008,7 @@ export class Game {
   }
 
   reset() {
+    this.noSave = true;
     try {
       localStorage.removeItem(SAVE_KEY);
     } catch {
