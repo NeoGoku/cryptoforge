@@ -58,6 +58,9 @@ interface Period {
 
 export interface OperationsState {
   clock: number;
+  arrears: number;
+  shutdownDays: number;
+  restructures: number;
   grid: {
     level: number;
     provider: Provider;
@@ -112,6 +115,9 @@ export function restoreOperations(input?: unknown, machines: string[] = []): Ope
   const grid = object(raw.grid);
   const s: OperationsState = {
     clock: number(raw.clock),
+    arrears: number(raw.arrears),
+    shutdownDays: integer(raw.shutdownDays, 3),
+    restructures: integer(raw.restructures),
     grid: {
       level: integer(grid.level, 20),
       provider: pick(grid.provider, keys(PROVIDERS), 'local'),

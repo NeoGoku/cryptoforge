@@ -65,6 +65,15 @@ function gridPanel(g: Game) {
   const outage = g.evInfo();
   html += card('Ausfallplan', buttons(act('Manuell', 'plan', 'manual', false, s.plan === 'manual') + act('Automatisch Akku', 'plan', 'battery', false, s.plan === 'battery') + act('Automatisch Dienst', 'plan', 'service', false, s.plan === 'service'))
     + (outage?.id === 'outage' ? description(`Stromausfall · noch ${Math.ceil(outage.left)} s`) + buttons(act('Akku · 0,25 kWh', 'outage', 'battery', s.charge < 0.25 || s.batteryMode === 'off') + act(`Entstördienst · ${eur(o.outageCost())}`, 'outage', 'service', g.s.cash < o.outageCost())) : description('Netz verfügbar.')));
+  html += card('Betriebsrückstände', item('Offen / Status', `${eur(o.s.arrears)} · ${o.debtStage().name}`)
+    + description('Bei 120 € Rückstand sinkt die Leistung auf 88 %, bei 300 € auf 62 %. Ab 600 € stoppt das Netz.')
+    + buttons(act('Offenen Betrag tilgen', 'repay-arrears', '', o.s.arrears <= 1e-9 || g.s.cash <= 0))
+    + (o.debtStage().output === 0 ? description(`Spieltag(e) mit Abschaltung: ${o.s.shutdownDays} / 3`)
+      + buttons(act('Wiederaufbau prüfen', 'restructure', '', !o.canRestructure())) : ''));
+  html += card('Tarifvorschau', [0, 12, 19].map((hour, index) => {
+    const forecast = o.gridLoad(load.demand, undefined, hour);
+    return item(['Nacht', 'Tag', 'Spitze'][index], `${eur(g.tariff(hour), 3)}/kWh · ${fmt(forecast.throttle * 100)} % Netzleistung`);
+  }).join('') + description('Prognose mit der aktuellen Last und Akkuladung.'));
   return html;
 }
 
@@ -221,6 +230,7 @@ export function performOpsAction(g: Game, operation: string, id: string) {
   const o = g.ops;
   const [primary, secondary] = id.split(':', 2);
   switch (operation) {
+    case 'repay-arrears': o.repayArrears(); break;
     case 'grid': o.upgradeGrid(); break;
     case 'battery': o.upgradeGrid(true); break;
     case 'provider': if (owns(PROVIDERS, id)) o.provider(id); break;

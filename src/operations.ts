@@ -62,19 +62,67 @@ export class Operations {
   tariffAt(hour: number) { return hour < 7 || hour >= 22 ? 0.76 : hour >= 17 ? 1.36 : 1; }
   priceFactor(hour = this.hour) { return this.tariffAt(hour) * PROVIDERS[this.s.grid.provider].price; }
 
-  gridLoad(kw: number, effects = this.collectionEffects()) {
+  gridLoad(kw: number, effects = this.collectionEffects(), hour = this.hour) {
     const { batteryMode, charge, batteryLevel, guard, policy } = this.s.grid;
     const capacity = this.gridCapacity(effects);
     const backup = batteryMode === 'auto' && charge > EPS ? Math.min(Math.max(0, kw - capacity), 0.65 * batteryLevel) : 0;
     const usable = Math.min(kw, (guard ? 0.88 : 1) * capacity + backup);
-    const scheduled = policy === 'night' && this.tariffAt(this.hour) !== 0.76 ? 0 : policy === 'peak' && this.tariffAt(this.hour) > 1 ? 0.65 : 1;
+    const scheduled = policy === 'night' && this.tariffAt(hour) !== 0.76 ? 0 : policy === 'peak' && this.tariffAt(hour) > 1 ? 0.65 : 1;
     const throttle = (kw > EPS ? usable / kw : 1) * scheduled;
     const discharge = Math.min(backup, Math.max(0, kw * throttle - capacity));
     const grid = kw * throttle - discharge;
-    const charging = batteryMode !== 'off' && charge < this.batteryMax - EPS && this.tariffAt(this.hour) <= 1
+    const charging = batteryMode !== 'off' && charge < this.batteryMax - EPS && this.tariffAt(hour) <= 1
       ? Math.min(Math.max(0, (guard ? 0.88 : 1) * capacity - grid), batteryLevel * 0.3)
       : 0;
     return { demand: kw, capacity, throttle, grid: grid + charging, charging, discharge };
+  }
+
+  debtStage() {
+    const debt = this.s.arrears;
+    if (debt >= 600) return { name: 'Abschaltung', output: 0 };
+    if (debt >= 300) return { name: 'Notbetrieb', output: 0.62 };
+    if (debt >= 120) return { name: 'Sanktion', output: 0.88 };
+    if (debt > EPS) return { name: 'Mahnung', output: 1 };
+    return { name: 'Stabil', output: 1 };
+  }
+
+  chargeOperations(amount: number) {
+    const paid = Math.min(amount, Math.max(0, this.game.s.cash));
+    this.game.s.cash -= paid;
+    if (amount - paid > EPS) this.s.arrears += amount - paid;
+  }
+
+  repayArrears() {
+    const amount = Math.min(this.s.arrears, Math.max(0, this.game.s.cash));
+    if (amount <= EPS) return;
+    this.s.arrears -= amount;
+    this.game.s.cash -= amount;
+    if (this.debtStage().output > 0) this.s.shutdownDays = 0;
+    this.changed();
+  }
+
+  canRestructure() { return this.s.shutdownDays >= 3 && this.debtStage().output === 0; }
+
+  restructure() {
+    if (!this.canRestructure()) return;
+    const game = this.game;
+    const leased = new Set(Object.keys(this.s.leases));
+    for (const id of leased) game.removeRig(id);
+    const owned = Object.keys(game.s.machines).filter((id) => id !== 'm1');
+    const seized = owned.sort((a, b) => game.machineValue(game.s.machines[b]) - game.machineValue(game.s.machines[a]))
+      .slice(0, Math.ceil(owned.length * 0.35));
+    for (const id of seized) game.removeRig(id);
+    for (const [id, rig] of Object.entries(this.s.rigs)) {
+      if (rig.crew) this.s.rigs[id] = { ...rig, crew: undefined, xp: 0 };
+    }
+    this.s.crew = { hash: 0, cool: 0, power: 0 };
+    this.s.arrears = 0;
+    this.s.shutdownDays = 0;
+    this.s.restructures++;
+    game.s.active = 'kid';
+    game.s.cash = Math.max(game.s.cash, 350, Math.ceil(game.rentPerSec * 180));
+    game.toast(`Wiederaufbau gestartet. ${seized.length} Miner eingezogen, ${leased.size} Leasinggeräte zurückgegeben.`);
+    this.changed();
   }
 
   advance(dt: number) {
@@ -83,6 +131,7 @@ export class Operations {
     if (this.day !== before) {
       this.settleYield();
       this.settleLeases();
+      this.s.shutdownDays = this.debtStage().output === 0 ? Math.min(3, this.s.shutdownDays + 1) : 0;
       this.expireContracts();
       this.syncPeriods();
       this.changed();
@@ -624,7 +673,7 @@ export class Operations {
   prestige(next: SaveData, gain: number) {
     const previous = this.s;
     next.ops = restoreOperations({
-      clock: previous.clock, chips: previous.chips + gain, skills: previous.skills, consumables: previous.consumables,
+      clock: previous.clock, restructures: previous.restructures, chips: previous.chips + gain, skills: previous.skills, consumables: previous.consumables,
       projects: previous.projects, contractClaims: previous.contractClaims, daily: previous.daily, weekly: previous.weekly, traders: previous.traders,
     });
     next.ops.daily.baseline = {};

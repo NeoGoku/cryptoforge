@@ -639,7 +639,7 @@ export class MainScene extends Phaser.Scene {
       case 'repair': this.burst(c.x, c.y, 0x7ee787, 16); break;
       case 'overdrive': this.cameras.main.flash(250, 255, 120, 60); this.burst(c.x, c.y, 0xff6a3d, 30); this.floatText(c.x, c.y - 30 * DPR, 'OVERDRIVE!', '#ff9a6b'); break;
       case 'bonus': this.burst(c.x, c.y, 0xffc857, 22); break;
-      case 'prestige': this.cameras.main.flash(600, 255, 255, 255); this.burst(c.x, c.y, 0xffffff, 40); break;
+      case 'prestige': this.burst(c.x, c.y, 0xffffff, 40); break;
       case 'win': this.burst(c.x, c.y, 0xffc857, 18); break;
     }
   }

@@ -12,8 +12,8 @@ import { SAVE_SLOTS, slotPreview } from './save-slots';
 
 type Tab = 'shop' | 'build' | 'inv' | 'market' | 'chain' | 'bank' | 'tech' | 'tasks' | 'ach' | 'rooms' | 'ops' | 'more';
 const TABS: [Tab, string, string][] = [
-  ['shop', '🛒', 'Shop'], ['build', '🛠️', 'Werkstatt'], ['inv', '🎒', 'Lager'], ['market', '📊', 'Markt'], ['chain', '🌐', 'Explorer'],
-  ['ops', '⚡', 'Betrieb'], ['bank', '🏦', 'Bank'], ['tech', '🔬', 'Tech'], ['tasks', '🎯', 'Aufgaben'], ['ach', '🏆', 'Erfolge'], ['rooms', '🏠', 'Räume'], ['more', '⚙️', 'Mehr'],
+  ['ops', '⚡', 'Betrieb'], ['shop', '🛒', 'Shop'], ['build', '🛠️', 'Werkstatt'], ['inv', '🎒', 'Lager'], ['market', '📊', 'Markt'], ['chain', '🌐', 'Explorer'],
+  ['bank', '🏦', 'Bank'], ['tech', '🔬', 'Tech'], ['tasks', '🎯', 'Aufgaben'], ['ach', '🏆', 'Erfolge'], ['rooms', '🏠', 'Räume'], ['more', '⚙️', 'Mehr'],
 ];
 const KIND_NAME: Record<Kind, string> = { cpu: 'CPU', gpu: 'GPU', asic: 'ASIC', quantum: 'Quantum', fusion: 'Fusion' };
 const HW_LABEL: Record<HwMarket, string> = { gpu: 'GPUs', asic: 'ASICs', parts: 'PC-Teile' };
@@ -85,7 +85,7 @@ function drawLine(c: HTMLCanvasElement, pts: number[], color: string, fill = tru
 const QUIET = new Set(['deal-skip', 'shop-seg', 'shop-cat', 'draft-set', 'draft-none', 'draft-gpu-add', 'draft-gpu-rm', 'draft-gpu-sub', 'draft-gpu-fill', 'draft-clear', 'bp-save', 'bp-load', 'bp-del', 'bp-from', 'edit-m', 'place-m', 'unplace', 'draft-part', 'loan', 'daily', 'prestige', 'repair', 'insure', 'mode', 'room', 'room-coin', 'autosell', 'settings', 'tutorial', 'toggle']);
 
 export class HUD {
-  private tab: Tab = 'shop';
+  private tab: Tab = /^#betrieb(?:\/|$)/.test(location.hash) ? 'ops' : 'shop';
   private opsTab: OpsTab = 'grid';
   private shopSeg: 'parts' | 'pre' = 'parts';
   private shopCat: PartCat = 'gpu';
@@ -137,7 +137,9 @@ export class HUD {
     };
     scene.addEventListener('click', () => { settings.scene = !settings.scene; saveSettings(); sfx.tab(); applyScene(); });
     applyScene();
-    new ResizeObserver(() => this.fitPanel()).observe($('dock'));
+    const layout = new ResizeObserver(() => this.fitPanel());
+    layout.observe($('dock'));
+    layout.observe($('top'));
     window.addEventListener('resize', () => this.fitPanel());
     // Manuelles Minen über den Button (funktioniert auch bei ausgeblendetem Raum)
     const mine = $('mineBtn');
@@ -278,6 +280,15 @@ export class HUD {
     });
   }
 
+  private restructureModal() {
+    this.modal(`<h2>Betrieb neu aufbauen</h2>
+      <p>35 % deiner eigenen Miner (aufgerundet, Starter-PC ausgenommen) werden eingezogen. Leasinggeräte gehen zurück und die Rig-Crew wird aufgelöst. Du wechselst ins Kinderzimmer und erhältst mindestens 350 € Bargeld. Betriebsrückstände entfallen. Bankkredite laufen weiter.</p>
+      <div class="btns"><button id="cancel-restructure">Abbrechen</button><button class="primary" id="confirm-restructure">Wiederaufbau starten</button></div>`, (root) => {
+      root.querySelector('#cancel-restructure')!.addEventListener('click', () => this.closeModal());
+      root.querySelector('#confirm-restructure')!.addEventListener('click', () => { this.closeModal(); game.ops.restructure(); });
+    });
+  }
+
   private prestigeModal() {
     const gain = game.prestigeGain();
     const can = game.canPrestige();
@@ -329,7 +340,9 @@ export class HUD {
         }
         break;
       case 'ops':
-        if (d.op === 'tab' && isOpsTab(id)) {
+        if (d.op === 'restructure') {
+          if (game.ops.canRestructure()) this.restructureModal();
+        } else if (d.op === 'tab' && isOpsTab(id)) {
           this.opsTab = id;
           this.renderContent();
           $('content').scrollTop = 0;
@@ -398,6 +411,7 @@ export class HUD {
     this.renderContent();
     this.renderRooms();
     this.renderQuest();
+    this.updateDock(game.s.roomCoin[game.s.active] ?? DEFAULT_COIN);
     this.updateAfford();
     this.drawMinis();
   }
@@ -415,8 +429,9 @@ export class HUD {
     $('tabs').scrollLeft = sc;
   }
 
-  private renderContent() {
+  private renderContent(live = false) {
     const el = $('content');
+    el.classList.toggle('live-refresh', live);
     const scroll = el.scrollTop;
     let h = '';
     switch (this.tab) {
@@ -822,7 +837,7 @@ export class HUD {
     const st = s.stats;
     const p = s.prestige;
     return `${title('Vermögen')}<div class="card" style="--c:var(--gold)">${kv('Vermögen gesamt', `<b>${eur(game.netWorth())}</b>`)}<canvas class="mini" id="netchart" style="height:70px"></canvas>
-        ${kv('Geräte (60 %)', eur(game.gadgetValue() * 0.6))}${kv('Coins', eur(game.coinValue()))}${kv('Bargeld', eur(s.cash))}${kv('Für Orders reserviert', eur(game.ops.orderCash))}${kv('Schulden', eur(s.debt))}</div>
+        ${kv('Geräte (60 %)', eur(game.gadgetValue() * 0.6))}${kv('Coins', eur(game.coinValue()))}${kv('Bargeld', eur(s.cash))}${kv('Für Orders reserviert', eur(game.ops.orderCash))}${kv('Bankschulden', eur(s.debt))}${kv('Betriebsrückstände', eur(s.ops.arrears))}</div>
       ${title('Prestige')}
       <div class="btns" style="margin-bottom:8px">${opsLink('meta', 'Sammlungen, Skilltree & Chip-Shop')}</div>
       <div class="card" style="--c:#c88bff"><div class="row"><span class="name">✨ Forge-Punkte: ${p.points}</span><span class="tag" style="--c:#c88bff">+${num(p.points * 5)} %</span></div>
@@ -946,8 +961,10 @@ export class HUD {
   /** Mobil ohne Raum: Panel direkt unter dem Dock beginnen lassen. */
   private fitPanel() {
     const p = $('panel');
+    const top = Math.ceil($('top').getBoundingClientRect().bottom + 8);
+    document.body.style.setProperty('--hud-start', `${top}px`);
     const mobileOps = this.tab === 'ops' && window.innerWidth < 900;
-    $('dock').style.top = mobileOps ? `${Math.ceil($('top').getBoundingClientRect().bottom + 6)}px` : '';
+    $('dock').style.top = mobileOps ? `${top}px` : '';
     if (mobileOps || (!settings.scene && window.innerWidth < 900)) p.style.top = `${Math.round($('dock').getBoundingClientRect().bottom + 6)}px`;
     else p.style.top = '';
   }
@@ -1027,7 +1044,7 @@ export class HUD {
   private updateSlow(coin: string) {
     const net = game.netEurPerSec();
     const netEl = $('net');
-    netEl.textContent = game.s.cash <= 0 ? 'Strom gesperrt' : game.s.ev?.id === 'outage' ? 'Stromausfall' : `${net >= 0 ? '+' : ''}${num(net, 3)} €/s`;
+    netEl.textContent = game.ops.debtStage().output === 0 ? 'Netz gesperrt' : game.s.cash <= 0 ? 'Strom gesperrt' : game.s.ev?.id === 'outage' ? 'Stromausfall' : `${net >= 0 ? '+' : ''}${num(net, 3)} €/s`;
     netEl.classList.toggle('neg', game.s.cash <= 0 || net < 0);
     netEl.classList.toggle('up', game.s.cash > 0 && net > 0);
     $('debtPill').style.display = game.s.debt > 0.01 ? '' : 'none';
@@ -1082,12 +1099,12 @@ export class HUD {
     }
     if (this.liveT >= 1.5 && !this.pressed && (this.tab === 'market' || this.tab === 'bank' || this.tab === 'more' || this.tab === 'rooms' || this.tab === 'chain')) {
       this.liveT = 0;
-      this.renderContent();
+      this.renderContent(true);
       this.drawMinis();
     }
-    if (this.tab === 'ops' && this.liveT >= 1.5 && !this.pressed && !$('content').contains(document.activeElement?.closest('input,select') ?? null)) {
+    if (this.tab === 'ops' && this.liveT >= 1.5 && !this.pressed && !$('content').contains(document.activeElement?.closest('input,select,button:focus-visible') ?? null)) {
       this.liveT = 0;
-      this.renderContent();
+      this.renderContent(true);
     }
 
     // Forschung: Fortschritt
@@ -1106,7 +1123,10 @@ export class HUD {
     const cv = game.clickBase() * game.comboMult() * (game.boostOn('click') ? 10 : 1);
     $('clickVal').textContent = `≈ ${eur(cv)}`;
 
-    // Dock
+    this.updateDock(coin);
+  }
+
+  private updateDock(coin: string) {
     const room = ROOMS.find((x) => x.id === game.s.active)!;
     const st = game.roomStats[room.id];
     if (st) {
@@ -1118,7 +1138,7 @@ export class HUD {
       $('heatTxt').textContent = `Hitze ${num(st.heat)} / ${num(st.limit)}${st.throttle < 1 ? ` · gedrosselt ${num(st.throttle * 100)} %` : ''}`;
       $('roomSub').innerHTML = `${num(st.hash)} H/s · ${num(st.power)} W · Zustand ${num(st.cond)} % · ${coin}${st.idle ? ` · <span class="bad">${st.idle} Gerät(e) ohne passenden Coin</span>` : ''}`;
     }
-    const total = game.coinValue() - COINS.reduce((a, c) => a + (game.s.staked[c.id] ?? 0) * game.prices[c.id], 0);
+    const total = game.freeCoinValue();
     $('sell50').textContent = `50 % · ${eur(total * 0.5)}`;
     $('sellAll').textContent = `Alles verkaufen · ${eur(total)}`;
     ($('sell50') as HTMLButtonElement).disabled = total < 0.01;

@@ -52,15 +52,23 @@
   .ico { width: 36px; height: 36px; padding: 0; display: grid; place-items: center; font-size: 16px; border-radius: 10px; }
 
   /* Mission-Tracker */
-  #quest { position: absolute; top: 82px; left: 10px; width: 260px; padding: 10px 12px; animation: slidein .5s ease; }
+  #quest { position: absolute; top: var(--hud-start, 82px); left: 10px; width: 260px; padding: 10px 12px; animation: slidein .5s ease; }
   #quest small { color: var(--gold); text-transform: uppercase; letter-spacing: .7px; font-size: 10px; font-weight: 700; }
   #quest .t { font-weight: 700; margin: 2px 0; }
   #quest .d { color: var(--mut); font-size: 12px; margin-bottom: 8px; }
 
   /* Panel */
-  #panel { position: absolute; top: 76px; right: 10px; bottom: 10px; width: 336px; display: flex; flex-direction: column; overflow: hidden; }
+  #panel { position: absolute; top: var(--hud-start, 82px); right: 10px; bottom: 10px; width: 336px; display: flex; flex-direction: column; overflow: hidden; }
   #tabs { display: flex; gap: 2px; padding: 6px; border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: none; }
   #tabs::-webkit-scrollbar { display: none; }
+  @media (min-width: 900px) {
+    #tabs { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); flex: none; }
+    #tabs button { min-width: 0; }
+  }
+  #tabs button[data-tab="ops"] { color: #70e6d8; background: #4fd1c51a; }
+  #tabs button:focus-visible, #content button:focus-visible { outline: 2px solid var(--acc); outline-offset: -2px; }
+  #content.live-refresh .card { animation: none; }
+  #content { min-height: 0; }
   #tabs button { flex: 1 0 52px; position: relative; background: transparent; border: 0; border-radius: 10px; padding: 6px 0 5px; color: var(--mut); display: flex; flex-direction: column; align-items: center; gap: 2px; transition: .2s; }
   #tabs button i { font-style: normal; font-size: 17px; }
   #tabs button span { font-size: 9.5px; letter-spacing: .2px; }

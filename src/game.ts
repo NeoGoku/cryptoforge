@@ -357,7 +357,7 @@ export class Game {
   }
 
   running(): boolean {
-    return this.s.cash > 0 && this.s.ev?.id !== 'outage';
+    return this.s.cash > 0 && this.s.ev?.id !== 'outage' && this.ops.debtStage().output > 0;
   }
 
   evInfo(): { id: EvId; name: string; icon: string; left: number; total: number } | null {
@@ -470,6 +470,10 @@ export class Game {
     return Object.values(this.s.machines).reduce((a, m) => a + (this.s.ops.leases[m.id] ? 0 : this.machineValue(m)), 0) + parts;
   }
 
+  freeCoinValue(): number {
+    return COINS.reduce((sum, c) => sum + (this.s.wallet[c.id] ?? 0) * this.prices[c.id], 0);
+  }
+
   coinValue(): number {
     const orders = this.s.ops.orders.reduce((sum, o) => sum + (o.side === 'sell' ? o.amount * this.prices[o.coin] : 0), 0);
     return orders + this.ops.walletValue() + COINS.reduce((a, c) => a + ((this.s.wallet[c.id] ?? 0) + (this.s.staked[c.id] ?? 0)) * this.prices[c.id], 0);
@@ -480,11 +484,12 @@ export class Game {
   }
 
   netWorth(): number {
-    return this.assets() - this.s.debt;
+    return this.assets() - this.s.debt - this.s.ops.arrears;
   }
 
   loanLimit(): number {
-    return Math.max(0, 1000 + 0.8 * Math.max(0, this.assets() - this.s.debt) - this.s.debt);
+    const debt = this.s.debt + this.s.ops.arrears;
+    return Math.max(0, 1000 + 0.8 * Math.max(0, this.assets() - debt) - debt);
   }
 
   prestigeTotal(): number {
@@ -584,8 +589,8 @@ export class Game {
   }
 
   /** Netto-Ertrag (EUR/s) eines Geräts auf einer Münze, bei aktuellem Kurs und Upgrades. */
-  tariff(): number {
-    return BASE_TARIFF * Math.pow(0.9, this.s.upgrades.tariff ?? 0) * this.ops.priceFactor();
+  tariff(hour?: number): number {
+    return BASE_TARIFF * Math.pow(0.9, this.s.upgrades.tariff ?? 0) * this.ops.priceFactor(hour);
   }
 
   netPerSec(g: { hash: number; kind: Kind; watts: number }, coinId: string): number {
@@ -662,17 +667,21 @@ export class Game {
     }
 
     s.overheated = overheated;
+    const output = ops.debtStage().output;
     this.grid = ops.gridLoad(watts / 1000, bonuses);
+    if (output === 0) {
+      this.grid.grid = this.grid.charging = this.grid.discharge = this.grid.throttle = 0;
+    }
     if ((s.cash <= 0 || s.ev?.id === 'outage') && this.grid.charging > 0) {
       this.grid.grid -= this.grid.charging;
       this.grid.charging = 0;
     }
-    this.hashTotal = hash * this.grid.throttle;
+    this.hashTotal = hash * this.grid.throttle * output;
     for (const stat of Object.values(this.roomStats)) {
-      stat.hash *= this.grid.throttle;
+      stat.hash *= this.grid.throttle * output;
       stat.power *= this.grid.throttle;
     }
-    for (const id of Object.keys(this.rate)) this.rate[id] *= this.grid.throttle;
+    for (const id of Object.keys(this.rate)) this.rate[id] *= this.grid.throttle * output;
     const cost = Math.pow(0.97, ops.level('ledger')) * bonuses.cost;
     this.powerEurPerSec = (this.grid.grid / 3600) * tariff * POWER_SCALE * cost;
     this.rentPerSec = rent * cost;
@@ -734,7 +743,7 @@ export class Game {
 
     if (running) this.ops.updateGrid(dt, this.grid);
     const power = this.gridCostPerSec() * dt;
-    s.cash -= power + (this.rentPerSec + this.salaryPerSec + this.premiumPerSec) * dt;
+    this.ops.chargeOperations(power + (this.rentPerSec + this.salaryPerSec + this.premiumPerSec) * dt);
     s.stats.powerSpent += power;
     s.stats.rentPaid += this.rentPerSec * dt;
     s.stats.salaryPaid += this.salaryPerSec * dt;
@@ -1708,6 +1717,10 @@ export class Game {
     const m = { ...base, ...(src as unknown as SaveData) };
     m.stats = { ...base.stats, ...m.stats };
     m.ops = restoreOperations(src.ops, Object.keys(m.machines));
+    if (m.cash < 0) {
+      m.ops.arrears -= m.cash;
+      m.cash = 0;
+    }
     m.prestige = { ...base.prestige, ...m.prestige };
     m.autoSell = { ...base.autoSell, ...m.autoSell };
     m.draft = { parts: { ...(m.draft?.parts ?? {}) }, gpus: [...(m.draft?.gpus ?? [])] };
@@ -1802,15 +1815,17 @@ export class Game {
     const elapsed = Math.min(Math.max(0, (Date.now() - s.savedAt) / 1000), OFFLINE_CAP);
     if (elapsed < 30) return;
     this.offlineEur = 0;
-    if (s.cash > 0) {
+    const cost = this.costPerSec();
+    const miningTime = this.running() ? Math.min(elapsed, cost > 0 ? s.cash / cost : elapsed) : 0;
+    if (miningTime > 0) {
       for (const c in this.rate) {
-        const gain = this.rate[c] * elapsed * this.modeFactor();
+        const gain = this.rate[c] * miningTime * this.modeFactor();
         this.credit(c, gain);
         this.offlineGain += gain;
         this.offlineEur += gain * this.prices[c];
       }
     }
-    s.cash -= this.costPerSec() * elapsed;
+    this.ops.chargeOperations(cost * miningTime);
     s.debt += s.debt * LOAN_RATE * Math.min(elapsed, 1800);
     s.savedAt = Date.now();
   }
