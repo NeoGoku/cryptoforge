@@ -42,6 +42,12 @@ export const SITE_SHOP = {
   purifier: { name: 'Luftreiniger', description: 'Weniger Staub · Verschleiß −5 %', cost: 950 },
 } as const;
 
+export const DESK_UPGRADES = [
+  { name: 'Montagetisch', cost: 700, description: '−8 % Verschleiß', tech: null, hash: 1, power: 1, wear: 0.92 },
+  { name: 'Monitoring-Tisch', cost: 2600, description: '+3 % Hashrate, −5 % Stromverbrauch', tech: 'eff', hash: 1.03, power: 0.95, wear: 1 },
+  { name: 'Leitstand', cost: 9800, description: '+5 % Hashrate, −10 % Verschleiß', tech: 'gridops', hash: 1.05, power: 1, wear: 0.90 },
+] as const;
+
 export const SKILLS = {
   ledger: { name: 'Ops Ledger', description: 'Niedrigere Betriebs- und Personalkosten', cost: 1, max: 5, requires: '' },
   backbone: { name: 'Grid Backbone', description: 'Mehr Netzkapazität', cost: 2, max: 4, requires: '' },

@@ -48,23 +48,29 @@ export const PARTS: PartDef[] = [
   { id: 'case_frame6', cat: 'case', brand: 'Stackwell', name: 'Open Frame 6', cost: 150, color: 0x9aa3b5, slots: 6, rig: true, heatMul: 0.85, desc: 'Offener Mining-Rahmen für 6 Karten. Sehr gute Luftzirkulation.' },
   { id: 'case_frame8', cat: 'case', brand: 'Stackwell', name: 'Open Frame 8 Pro', cost: 240, color: 0xb0b8c8, slots: 8, rig: true, heatMul: 0.8, desc: 'Stabiler Alu-Rahmen für 8 Karten.' },
   { id: 'case_frame12', cat: 'case', brand: 'Stackwell', name: 'Mega Frame 12', cost: 480, color: 0xc8a86a, slots: 12, rig: true, heatMul: 0.78, desc: 'Doppelstöckiger Profi-Rahmen für 12 Karten.' },
+  { id: 'case_air3', cat: 'case', brand: 'Brevalt', name: 'Airflow T3', cost: 230, color: 0x3c717a, slots: 3, rig: true, heatMul: 0.82, desc: 'Kompakter offener Rahmen für 3 Karten, Hitze −18 %.' },
   // Mainboards
   { id: 'mb_t1', cat: 'board', brand: 'Tessarc', name: 'T1 Basic', cost: 60, color: 0x2f6b4a, slots: 1, desc: 'Einsteiger-Board mit 1 PCIe-Slot.' },
   { id: 'mb_g2', cat: 'board', brand: 'Tessarc', name: 'G2 Gaming', cost: 120, color: 0x2a2f45, slots: 2, desc: 'Gaming-Board mit 2 PCIe-Slots.' },
   { id: 'mb_m6', cat: 'board', brand: 'Tessarc', name: 'MineBoard 6', cost: 190, color: 0x2f5b6b, slots: 6, desc: 'Mining-Board mit 6 PCIe-Slots (Riser).' },
   { id: 'mb_m8', cat: 'board', brand: 'Tessarc', name: 'MineBoard 8 Pro', cost: 290, color: 0x3b4f8a, slots: 8, desc: 'Mining-Board mit 8 PCIe-Slots.' },
   { id: 'mb_m12', cat: 'board', brand: 'Tessarc', name: 'MineBoard 12 X', cost: 560, color: 0x6b3b8a, slots: 12, desc: 'Server-Mining-Board mit 12 PCIe-Slots.' },
+  { id: 'mb_eco3', cat: 'board', brand: 'Tessarc', name: 'E3 Workstation', cost: 245, color: 0x317370, slots: 3, desc: 'Workstation-Board mit 3 PCIe-Slots.' },
   // Prozessoren
   { id: 'cpu_c4', cat: 'cpu', brand: 'Corvaxis', name: 'C4 Lite', cost: 55, color: 0x8a8f9c, hash: 3, watts: 65, heat: 6, desc: '4 Kerne. Reicht zum Betrieb, mint etwas CPU-Coin.' },
   { id: 'cpu_c6', cat: 'cpu', brand: 'Corvaxis', name: 'C6 Core', cost: 130, color: 0x9ca3b4, hash: 6, watts: 90, heat: 9, desc: '6 Kerne. Solider CPU-Hash.' },
   { id: 'cpu_c12', cat: 'cpu', brand: 'Corvaxis', name: 'C12 Titan', cost: 420, color: 0xc8a86a, hash: 14, watts: 150, heat: 15, desc: '12 Kerne. Stark für CPU-Algorithmen.' },
+  { id: 'cpu_c8e', cat: 'cpu', brand: 'Corvaxis', name: 'C8 Eco', cost: 255, color: 0x658f83, hash: 9, watts: 55, heat: 6, desc: '8 Kerne mit 55 W. Für stromsparendes Mondo-Mining.' },
+  { id: 'cpu_c24', cat: 'cpu', brand: 'Corvaxis', name: 'C24 Matrix', cost: 1850, color: 0x8fb0d6, hash: 46, watts: 180, heat: 22, unlock: 'chain', desc: '24 Kerne für schnelle CPU-Rigs.' },
   // Arbeitsspeicher
   { id: 'ram8', cat: 'ram', brand: 'Lumeri', name: '8 GB DDR4', cost: 22, color: 0x3a6b3a, hashMul: 1, desc: 'Minimum für einen Miner.' },
   { id: 'ram16', cat: 'ram', brand: 'Lumeri', name: '16 GB DDR4', cost: 45, color: 0x2f5b8a, hashMul: 1.03, desc: 'Hash +3 %.' },
   { id: 'ram32', cat: 'ram', brand: 'Lumeri', name: 'Pulse 32 GB DDR5', cost: 110, color: 0x8a2f5b, hashMul: 1.06, desc: 'Hash +6 %.' },
+  { id: 'ram64', cat: 'ram', brand: 'Lumeri', name: 'Matrix 64 GB', cost: 440, color: 0x609aca, hashMul: 1.12, unlock: 'chain', desc: 'Hash +12 %.' },
   // Speicher
   { id: 'ssd128', cat: 'ssd', brand: 'Dravon', name: '128 GB SATA', cost: 18, color: 0x4a4f5c, hashMul: 1, desc: 'Reicht für das Mining-OS.' },
   { id: 'ssd1t', cat: 'ssd', brand: 'Dravon', name: '1 TB NVMe', cost: 60, color: 0x2a2f45, hashMul: 1.02, desc: 'Schnelle Blockchain-Synchronisation: Hash +2 %.' },
+  { id: 'ssd4t', cat: 'ssd', brand: 'Dravon', name: '4 TB NVMe Pro', cost: 310, color: 0x5e928a, hashMul: 1.05, unlock: 'chain', desc: 'Schnelle Synchronisation: Hash +5 %.' },
   // Netzteile
   { id: 'psu450', cat: 'psu', brand: 'Ardentia', name: '450 W Bronze', cost: 40, color: 0x4a4f5c, cap: 450, eff: 0.85, desc: '450 W, 85 % Wirkungsgrad.' },
   { id: 'psu750', cat: 'psu', brand: 'Ardentia', name: '750 W Gold', cost: 90, color: 0x6b5a2f, cap: 750, eff: 0.9, desc: '750 W, 90 % Wirkungsgrad.' },
@@ -72,6 +78,8 @@ export const PARTS: PartDef[] = [
   { id: 'psu2000', cat: 'psu', brand: 'Ardentia', name: '2000 W Titanium', cost: 380, color: 0x9aa3b5, cap: 2000, eff: 0.95, desc: '2000 W, 95 % Wirkungsgrad.' },
   { id: 'psu3200', cat: 'psu', brand: 'Ardentia', name: 'Server 3200 W', cost: 560, color: 0x5b6b7a, cap: 3200, eff: 0.94, desc: 'Server-Netzteil, 3200 W.' },
   { id: 'psu5000', cat: 'psu', brand: 'Ardentia', name: 'Server 5000 W Dual', cost: 950, color: 0x3b4a5a, cap: 5000, eff: 0.94, desc: 'Doppel-Server-Netzteil, 5000 W.' },
+  { id: 'psu650eco', cat: 'psu', brand: 'Ardentia', name: '650 W Eco Platinum', cost: 165, color: 0xb6cfb9, cap: 650, eff: 0.94, desc: '650 W, 94 % Wirkungsgrad. Für effiziente kleine Rigs.' },
+  { id: 'psu4200', cat: 'psu', brand: 'Ardentia', name: 'Server 4200 W Titanium', cost: 1550, color: 0x818ac0, cap: 4200, eff: 0.96, unlock: 'gridops', desc: '4200 W, 96 % Wirkungsgrad.' },
   // Grafikkarten
   { id: 'g_k210', cat: 'gpu', brand: 'Kiradyne', name: 'K-210 4 GB', cost: 95, color: 0x5a6e8c, hash: 12, watts: 110, heat: 12, desc: 'Günstige Einsteigerkarte, 1 Lüfter.' },
   { id: 'g_k340', cat: 'gpu', brand: 'Kiradyne', name: 'K-340 8 GB', cost: 150, color: 0x4a7bb0, hash: 21, watts: 135, heat: 15, desc: 'Preis-Leistungs-Tipp, 2 Lüfter.' },
@@ -79,10 +87,14 @@ export const PARTS: PartDef[] = [
   { id: 'g_nx62', cat: 'gpu', brand: 'Nyvex', name: 'NX-6200 12 GB', cost: 420, color: 0xa83a3a, hash: 48, watts: 200, heat: 22, desc: 'Viel Speicher, gut für Etra.' },
   { id: 'g_vx580', cat: 'gpu', brand: 'Vorcan', name: 'VX-580 12 GB', cost: 640, color: 0x2a2f38, hash: 66, watts: 250, heat: 28, desc: 'Obere Mittelklasse, 3 Lüfter.' },
   { id: 'g_vx720', cat: 'gpu', brand: 'Vorcan', name: 'VX-720 16 GB', cost: 1050, color: 0x1f2430, hash: 95, watts: 320, heat: 36, desc: 'High-End, sehr effizient je Hash.' },
-  { id: 'g_vx990', cat: 'gpu', brand: 'Vorcan', name: 'VX-990 Ultra 24 GB', cost: 1900, color: 0x111318, hash: 150, watts: 430, heat: 50, desc: 'Flaggschiff. Beste Leistung je Watt und je Slot.' },
+  { id: 'g_vx990', cat: 'gpu', brand: 'Vorcan', name: 'VX-990 Ultra 24 GB', cost: 1900, color: 0x111318, hash: 150, watts: 430, heat: 50, desc: '150 H/s bei 430 W.' },
+  { id: 'g_k240e', cat: 'gpu', brand: 'Kiradyne', name: 'K-240 Eco 6 GB', cost: 240, color: 0x43897f, hash: 18, watts: 65, heat: 9, desc: 'Stromsparende Einstiegskarte. 18 H/s bei 65 W.' },
+  { id: 'g_nx88e', cat: 'gpu', brand: 'Nyvex', name: 'NX-8800 Eco 16 GB', cost: 1520, color: 0x398d9f, hash: 86, watts: 172, heat: 21, unlock: 'eff', desc: 'Effizienzkarte für dicht bestückte Rigs. 86 H/s bei 172 W.' },
+  { id: 'g_vx1100', cat: 'gpu', brand: 'Vorcan', name: 'VX-1100 Array 32 GB', cost: 5600, color: 0x8271b8, hash: 245, watts: 460, heat: 53, unlock: 'gridops', desc: '245 H/s pro Slot. Benötigt ein starkes Netzteil.' },
   // Kühlung
   { id: 'cl_air', cat: 'cool', brand: 'Glacira', name: 'Air 4 Lüfter-Set', cost: 50, color: 0x8ab0c8, watts: 15, heatMul: 0.85, desc: 'Zusätzliche Lüfter: Hitze −15 %.' },
   { id: 'cl_aio', cat: 'cool', brand: 'Glacira', name: 'AIO 360 Wasserkühlung', cost: 170, color: 0x4fd1c5, watts: 35, heatMul: 0.7, desc: 'Wasserkühlung: Hitze −30 %.' },
+  { id: 'cl_loop', cat: 'cool', brand: 'Glacira', name: 'Dual Loop 480', cost: 460, color: 0x7694cf, watts: 55, heatMul: 0.58, unlock: 'eff', desc: 'Doppelkreislauf: Hitze −42 %.' },
   { id: 'cl_imm', cat: 'cool', brand: 'Glacira', name: 'Immersion Tank', cost: 850, color: 0x3a8fb8, watts: 90, heatMul: 0.45, unlock: 'immersion', desc: 'Tauchkühlung in Spezialöl: Hitze −55 %.' },
 ];
 
@@ -104,6 +116,10 @@ export interface PrebuiltDef {
 
 /** Fertig-Miner: werden komplett gekauft, nicht zusammengebaut. */
 export const PREBUILT: PrebuiltDef[] = [
+  { id: 'eco-mini', brand: 'Brevalt', name: 'Mondo Mini', kind: 'cpu', model: 'tower', hash: 8, watts: 52, heat: 7, cost: 520, color: 0x5b8676, ledColor: 0x86e8bd, desc: 'Fertiger CPU-PC für Mondo. Niedriger Verbrauch bei 8 H/s.' },
+  { id: 'etra-duo', brand: 'Nyxaro', name: 'Etra Duo G2', kind: 'gpu', model: 'tower', hash: 68, watts: 290, heat: 36, cost: 2250, color: 0x455582, ledColor: 0xb1a1ff, desc: 'Fertiger GPU-Tower für Etra mit 68 H/s.' },
+  { id: 'asic-sprint', brand: 'Helix Forge', name: 'HF-Sprint 14', kind: 'asic', model: 'asic', hash: 540, watts: 1860, heat: 148, cost: 4850, color: 0x705782, ledColor: 0xdb9dff, desc: 'Kompakter ASIC für BitForge und Luxar.' },
+  { id: 'asic-loop', brand: 'Monterra', name: 'MT-Cascade 38', kind: 'asic', model: 'asic', hash: 3800, watts: 7100, heat: 345, cost: 54000, color: 0x346b7a, ledColor: 0x68e9ea, unlock: 'immersion', desc: 'Flüssiggekühltes ASIC-System für große Räume und ein starkes Netz.' },
   { id: 'asic', brand: 'Helix Forge', name: 'HF-Titan 9', kind: 'asic', model: 'asic', hash: 260, watts: 1400, heat: 120, cost: 1900, color: 0xb8862b, ledColor: 0xffc857, desc: 'Einsteiger-ASIC. Nur ASIC-Algorithmen (BitForge, Luxar).' },
   { id: 'pro', brand: 'Monterra', name: 'MT-Pulse X', kind: 'asic', model: 'asic', hash: 900, watts: 3200, heat: 260, cost: 6500, color: 0xb0584c, ledColor: 0xff6a3d, desc: 'Profi-ASIC mit 4 Lüftern. Schafft Luxar.' },
   { id: 'hydro', brand: 'Helix Forge', name: 'HF-Titan 21 Hydro', kind: 'asic', model: 'asic', hash: 2200, watts: 5200, heat: 240, cost: 16500, color: 0x4a7bb0, ledColor: 0x7ab8ff, desc: 'Wassergekühlter Industrie-ASIC. Wenig Hitze je Hash.' },

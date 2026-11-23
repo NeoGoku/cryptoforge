@@ -1,6 +1,6 @@
-import { COINS, ROOMS } from './config';
+import { COINS, ROOMS, techDef } from './config';
 import type { Game } from './game';
-import { COLLECTIONS, CONSUMABLES, COOLING, CREW, DAY_SECONDS, GRID_PROFILES, LAYOUTS, METRIC_NAMES, MODS, PROVIDERS, SITE_SHOP, SKILLS } from './operations-data';
+import { COLLECTIONS, CONSUMABLES, COOLING, CREW, DAY_SECONDS, DESK_UPGRADES, GRID_PROFILES, LAYOUTS, METRIC_NAMES, MODS, PROVIDERS, SITE_SHOP, SKILLS } from './operations-data';
 import type { Objective, Target } from './operations-data';
 import { keys, owns } from './operations-state';
 
@@ -138,6 +138,14 @@ function roomsPanel(g: Game) {
       + item('Raumzustand', `${fmt(g.s.cond[room.id] ?? 100, 0)} %`)
       + buttons(act(g.s.active === room.id ? 'Aktiver Raum' : 'Raum öffnen', 'room-select', room.id, false, g.s.active === room.id))
       + (g.s.cond[room.id] < 95 ? buttons(act(`Raum reparieren · ${eur(g.repairCost(room.id))}`, 'room-repair', room.id, g.s.cash < g.repairCost(room.id))) : '')
+      + section('Schreibtisch')
+      + DESK_UPGRADES.map((desk, index) => {
+        const level = o.deskLevel(room.id);
+        const owned = level > index;
+        const requirement = desk.tech && !g.has(desk.tech) ? ` · Benötigt ${techDef(desk.tech).name}` : '';
+        const label = owned ? 'Installiert' : level < index ? 'Vorstufe nötig' : `Ausbauen · ${eur(desk.cost)}`;
+        return `<div class="cf-ops-upgrade"><span>${desk.name}<small>${desk.description}${requirement}</small></span>${act(label, 'room-desk', `${room.id}:${index}`, level !== index || Boolean(requirement) || g.s.cash < desk.cost, owned)}</div>`;
+      }).join('')
       + section('Einrichtung & Technik')
       + keys(SITE_SHOP).map((id) => {
         const entry = SITE_SHOP[id], owned = items.includes(id);
@@ -266,6 +274,7 @@ export function performOpsAction(g: Game, operation: string, id: string) {
     case 'cooling': if (owns(COOLING, id)) o.cooling(g.s.active, id); break;
     case 'layout': if (owns(LAYOUTS, id)) o.layout(g.s.active, id); break;
     case 'site': if (owns(SITE_SHOP, id)) o.buySite(g.s.active, id); break;
+    case 'room-desk': o.buyDesk(primary, Number(secondary)); break;
     case 'room-site': if (owns(SITE_SHOP, secondary)) o.buySite(primary, secondary); break;
     case 'room-select': g.setRoom(id); break;
     case 'room-repair': g.repairRoom(id); break;

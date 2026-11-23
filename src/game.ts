@@ -11,16 +11,16 @@ import type { SaveSlot } from './save-slots';
 
 export const BASE_TARIFF = 0.32;   // EUR/kWh
 export const POWER_SCALE = 5000;   // 1 s Spielzeit = 5000 s Stromverbrauch (macht Strom relevant)
-export const CLICK_EUR = 0.3;      // Mindestwert eines Klicks
-export const CLICK_SHARE = 0.12;   // Klick = 12 % der Produktion je Sekunde
+export const CLICK_EUR = 0.16;      // Mindestwert eines Klicks
+export const CLICK_SHARE = 0.045;  // Klick = 4,5 % der Produktion je Sekunde
 export const POOL_FEE = 0.03;
 export const SOLO_MULT = 1.12;
 export const SOLO_MEAN = 25;       // Sekunden zwischen Blöcken (Ø)
 export const STAKE_RATE = 0.0025 / 60; // 0,25 % pro Minute
 export const LOAN_RATE = 0.06 / 600;   // 6 % je 10 Minuten
 export const INSURE_RATE = 0.00004;    // EUR/s je EUR Gerätewert
-const OFFLINE_CAP = 8 * 3600;
-const ACH_REWARD = 250;
+const OFFLINE_CAP = 2 * 3600;
+const ACH_REWARD = 110;
 
 export type Slots = (string | null)[];
 export type Regime = 'bull' | 'bear' | 'side';
@@ -79,7 +79,7 @@ export interface RoomStat { idle: number; heat: number; limit: number; throttle:
 export interface Mission { title: string; desc: string; reward: number; done: (g: Game) => boolean; prog: (g: Game) => [number, number]; }
 export interface Achievement { id: string; name: string; desc: string; test: (g: Game) => boolean; }
 
-const mk = (title: string, desc: string, reward: number, done: (g: Game) => boolean, prog: (g: Game) => [number, number]): Mission => ({ title, desc, reward, done, prog });
+const mk = (title: string, desc: string, reward: number, done: (g: Game) => boolean, prog: (g: Game) => [number, number]): Mission => ({ title, desc, reward: Math.round(reward * 0.6), done, prog });
 const min1 = (v: number, t: number): [number, number] => [Math.min(v, t), t];
 
 const maxGpus = (g: Game): number => Object.values(g.s.machines).reduce((a, m) => Math.max(a, m.build?.gpus.length ?? 0), 0);
@@ -337,7 +337,7 @@ export class Game {
   // ---- Abfragen ----
 
   difficulty(): number {
-    return 1 + (this.s.playSec / 3600) * 0.3;
+    return 1.35 + (this.s.playSec / 3600) * 0.3;
   }
 
   prestigeMult(): number {
@@ -514,7 +514,7 @@ export class Game {
 
   dailyReward(): number {
     const next = this.s.streak.last === yesterdayStr() ? this.s.streak.count + 1 : 1;
-    return Math.round(100 * Math.min(next, 7) * (1 + 0.1 * this.s.prestige.points));
+    return Math.round(55 * Math.min(next, 7) * (1 + 0.1 * this.s.prestige.points));
   }
 
   repairCost(roomId: string): number {
@@ -1846,14 +1846,15 @@ export class Game {
     location.reload();
   }
 
-  /** Ertrag für die Zeit seit dem letzten Speichern (max. 8 h, Zinsen max. 30 min). */
+  /** Ertrag für die Zeit seit dem letzten Speichern (max. 2 h, halbe Produktionszeit, Zinsen max. 30 min). */
   private applyOffline() {
     const s = this.s;
     const elapsed = Math.min(Math.max(0, (Date.now() - s.savedAt) / 1000), OFFLINE_CAP);
     if (elapsed < 30) return;
     this.offlineEur = 0;
     const cost = this.costPerSec();
-    const miningTime = this.running() ? Math.min(elapsed, cost > 0 ? s.cash / cost : elapsed) : 0;
+    const productionTime = elapsed * 0.5;
+    const miningTime = this.running() ? Math.min(productionTime, cost > 0 ? s.cash / cost : productionTime) : 0;
     if (miningTime > 0) {
       for (const c in this.rate) {
         const gain = this.rate[c] * miningTime * this.modeFactor();

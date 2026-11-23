@@ -1,5 +1,5 @@
 import { COINS, ROOMS } from './config';
-import { CHIP_LIMIT, CONSUMABLES, CONTRACTS, COOLING, CREW, LAYOUTS, MODS, ORDER_LIMIT, ORDER_SLOTS_PER_CHIP, PROVIDERS, SITE_SHOP, SKILLS } from './operations-data';
+import { CHIP_LIMIT, CONSUMABLES, CONTRACTS, COOLING, CREW, DESK_UPGRADES, LAYOUTS, MODS, ORDER_LIMIT, ORDER_SLOTS_PER_CHIP, PROVIDERS, SITE_SHOP, SKILLS } from './operations-data';
 import type { Metric } from './operations-data';
 
 export type Keys<T> = Extract<keyof T, string>;
@@ -74,6 +74,7 @@ export interface OperationsState {
   cooling: Partial<Record<string, Cooling>>;
   layouts: Partial<Record<string, Layout>>;
   sites: Record<string, SiteItem[]>;
+  desks: Partial<Record<string, number>>;
   crew: Record<CrewRole, number>;
   rigs: Record<string, RigSettings>;
   mods: Partial<Record<Mod, number>>;
@@ -128,7 +129,7 @@ export function restoreOperations(input?: unknown, machines: string[] = []): Ope
       policy: pick(grid.policy, ['always', 'peak', 'night'], 'always'),
       plan: pick(grid.plan, ['manual', 'battery', 'service'], 'manual'),
     },
-    cooling: {}, layouts: {}, sites: {}, crew: { hash: 0, cool: 0, power: 0 }, rigs: {}, mods: {}, leases: {},
+    cooling: {}, layouts: {}, sites: {}, desks: {}, crew: { hash: 0, cool: 0, power: 0 }, rigs: {}, mods: {}, leases: {},
     treasury: {}, yieldOn: raw.yieldOn !== false, yieldDays: integer(raw.yieldDays), yieldTotal: number(raw.yieldTotal),
     yieldHistory: [], ledger: [], nextOrder: integer(raw.nextOrder) || 1, orders: [], filled: integer(raw.filled), autoCoins: {},
     daily: { index: -1, baseline: {}, claimed: [] }, weekly: { index: -1, baseline: {}, claimed: [] },
@@ -136,6 +137,7 @@ export function restoreOperations(input?: unknown, machines: string[] = []): Ope
   };
   s.grid.charge = Math.min(s.grid.charge, 0.7 * s.grid.batteryLevel);
   for (const r of ROOMS) {
+    s.desks[r.id] = integer(object(raw.desks)[r.id], DESK_UPGRADES.length);
     s.cooling[r.id] = pick(object(raw.cooling)[r.id], keys(COOLING), 'normal');
     s.layouts[r.id] = pick(object(raw.layouts)[r.id], keys(LAYOUTS), 'standard');
     s.sites[r.id] = [...new Set(list(object(raw.sites)[r.id]).filter((id): id is SiteItem => belongs(id, keys(SITE_SHOP))))];

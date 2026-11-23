@@ -3,7 +3,7 @@ import type { CoinDef } from './config';
 import type { Game, SaveData } from './game';
 import {
   CHIP_LIMIT, COLLECTIONS, CONSUMABLES, CONTRACTS, COOLING, CREW, DAILY, DAY_SECONDS, GRID_PROFILES, LAYOUTS, MODS, ORDER_LIMIT, ORDER_SLOTS_PER_CHIP,
-  PROJECTS, PROVIDERS, SITE_SHOP, SKILLS, WALLET_TIERS, WEEKLY, YIELD_APY,
+  DESK_UPGRADES, PROJECTS, PROVIDERS, SITE_SHOP, SKILLS, WALLET_TIERS, WEEKLY, YIELD_APY,
 } from './operations-data';
 import type { Effect, Metric, Objective, Target } from './operations-data';
 import { keys, owns, restoreOperations } from './operations-state';
@@ -25,7 +25,7 @@ export class Operations {
   get hour() { return this.s.clock % DAY_SECONDS / DAY_SECONDS * 24; }
   get week() { return Math.floor((this.day - 1) / WEEK_DAYS) + 1; }
   get batteryMax() { return 0.7 * this.s.grid.batteryLevel; }
-  get gridCost() { return Math.round(550 * 1.48 ** this.s.grid.level); }
+  get gridCost() { return Math.round(800 * 1.48 ** this.s.grid.level); }
   get batteryCost() { return Math.round(750 * 1.55 ** this.s.grid.batteryLevel); }
   get orderLimit() { return ORDER_LIMIT + this.level('contract') * ORDER_SLOTS_PER_CHIP; }
   get orderCash() { return this.s.orders.reduce((sum, o) => sum + (o.side === 'buy' ? o.amount * o.limit : 0), 0); }
@@ -218,6 +218,18 @@ export class Operations {
     this.changed();
   }
 
+  deskLevel(room: string) { return this.s.desks[room] ?? 0; }
+
+  buyDesk(room: string, expectedLevel: number) {
+    if (!this.game.s.rooms[room]) return;
+    const level = this.deskLevel(room);
+    if (expectedLevel !== level) return;
+    const next = DESK_UPGRADES[level];
+    if (!next || (next.tech && !this.game.has(next.tech)) || !this.pay(next.cost)) return;
+    this.s.desks[room] = level + 1;
+    this.changed();
+  }
+
   cooling(room: string, value: Cooling) {
     if (!this.game.s.rooms[room]) return;
     this.s.cooling[room] = value;
@@ -227,18 +239,25 @@ export class Operations {
   siteEffects(room: string, rawHeat: number, limit: number) {
     const items = this.s.sites[room] ?? [];
     const layout = LAYOUTS[this.s.layouts[room] ?? 'standard'];
+    let deskHash = 1, deskPower = 1, deskWear = 1;
+    for (let i = 0; i < this.deskLevel(room); i++) {
+      const desk = DESK_UPGRADES[i];
+      deskHash *= desk.hash;
+      deskPower *= desk.power;
+      deskWear *= desk.wear;
+    }
     const siteHeat = layout.cooling * (items.includes('ducts') ? 0.88 : 1);
     const mode = this.s.cooling[room] ?? 'normal';
     const ratio = rawHeat * siteHeat / limit;
     const activeMode = mode === 'auto' ? (ratio >= 0.9 ? 'boost' : ratio < 0.6 ? 'quiet' : 'normal') : mode;
     return {
       heat: siteHeat * COOLING[activeMode].heat,
-      power: layout.power * COOLING[activeMode].power * (items.includes('breakers') ? 0.92 : 1),
-      hash: layout.hash * (items.includes('controller') ? 1.08 : 1)
+      power: deskPower * layout.power * COOLING[activeMode].power * (items.includes('breakers') ? 0.92 : 1),
+      hash: deskHash * layout.hash * (items.includes('controller') ? 1.08 : 1)
         * (items.includes('plant') ? 1.0035 : 1)
         * (items.includes('lighting') ? 1.006 : 1)
         * (items.includes('interior') ? 1.012 : 1),
-      wear: (items.includes('bench') ? 0.8 : 1) * (items.includes('purifier') ? 0.95 : 1),
+      wear: deskWear * (items.includes('bench') ? 0.8 : 1) * (items.includes('purifier') ? 0.95 : 1),
     };
   }
 

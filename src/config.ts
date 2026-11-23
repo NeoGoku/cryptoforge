@@ -49,16 +49,16 @@ const grid = (cols: number, rows: number, u0: number, v0: number, su = 1.8, sv =
 
 export const ROOMS: RoomDef[] = [
   { id: 'kid', name: 'Kinderzimmer', size: 6, maxHeat: 200, cost: 0, rent: 0, spots: [[1.6, 3.2], [3.6, 3.2]] },
-  { id: 'store', name: 'Lagerraum', size: 8, maxHeat: 450, cost: 2500, rent: 0.12, spots: [[2.4, 3.6], [4.2, 3.6], [2.4, 5.4], [4.2, 5.4]] },
-  { id: 'garage', name: 'Garage', size: 10, maxHeat: 700, cost: 12000, rent: 0.35, spots: [[3.0, 4.0], [4.8, 4.0], [6.6, 4.0], [3.0, 6.0], [4.8, 6.0], [6.6, 6.0]] },
-  { id: 'basement', name: 'Keller', size: 10, maxHeat: 1100, cost: 40000, rent: 0.7, spots: grid(4, 2, 2.2, 3.6) },
-  { id: 'hall', name: 'Industriehalle', size: 12, maxHeat: 2200, cost: 150000, rent: 1.6, spots: grid(4, 3, 3.0, 3.4) },
-  { id: 'dc', name: 'Rechenzentrum', size: 14, maxHeat: 5200, cost: 600000, rent: 4, spots: grid(5, 4, 2.8, 3.2, 1.9, 1.9) },
-  { id: 'suite', name: 'Datacenter Suite', size: 15, maxHeat: 10000, cost: 1400000, rent: 7,
+  { id: 'store', name: 'Lagerraum', size: 8, maxHeat: 450, cost: 3750, rent: 0.12, spots: [[2.4, 3.6], [4.2, 3.6], [2.4, 5.4], [4.2, 5.4]] },
+  { id: 'garage', name: 'Garage', size: 10, maxHeat: 700, cost: 18000, rent: 0.35, spots: [[3.0, 4.0], [4.8, 4.0], [6.6, 4.0], [3.0, 6.0], [4.8, 6.0], [6.6, 6.0]] },
+  { id: 'basement', name: 'Keller', size: 10, maxHeat: 1100, cost: 60000, rent: 0.7, spots: grid(4, 2, 2.2, 3.6) },
+  { id: 'hall', name: 'Industriehalle', size: 12, maxHeat: 2200, cost: 225000, rent: 1.6, spots: grid(4, 3, 3.0, 3.4) },
+  { id: 'dc', name: 'Rechenzentrum', size: 14, maxHeat: 5200, cost: 900000, rent: 4, spots: grid(5, 4, 2.8, 3.2, 1.9, 1.9) },
+  { id: 'suite', name: 'Datacenter Suite', size: 15, maxHeat: 10000, cost: 2100000, rent: 7,
     gridKw: 12, gate: { room: 'dc', grid: 4, tech: 'gridops' }, spots: grid(6, 4, 2, 3.1, 1.9, 2.1) },
-  { id: 'campus', name: 'Datacenter Campus', size: 17, maxHeat: 22000, cost: 4200000, rent: 14,
+  { id: 'campus', name: 'Datacenter Campus', size: 17, maxHeat: 22000, cost: 6300000, rent: 14,
     gridKw: 24, gate: { room: 'suite', grid: 7, tech: 'compression' }, spots: grid(7, 5, 2, 3.1, 1.9, 2.1) },
-  { id: 'megafarm', name: 'Mega-Farm Campus', size: 19, maxHeat: 48000, cost: 12000000, rent: 26,
+  { id: 'megafarm', name: 'Mega-Farm Campus', size: 19, maxHeat: 48000, cost: 18000000, rent: 26,
     gridKw: 44, gate: { room: 'campus', grid: 10, tech: 'orbital' }, spots: grid(8, 6, 2, 3.1, 1.9, 2.1) },
 ];
 
@@ -106,17 +106,17 @@ export interface TechDef {
 }
 
 export const TECHS: TechDef[] = [
-  { id: 'eff', name: 'Effizienz-Firmware', desc: 'Stromverbrauch −10 %', cost: 1500, secs: 45 },
-  { id: 'market', name: 'Marktanalyse', desc: 'Schaltet die Münze Nova frei', cost: 2500, secs: 60 },
-  { id: 'auto', name: 'Auto-Verkauf', desc: 'Verkauft Coins automatisch ab einem Schwellwert', cost: 3500, secs: 60 },
-  { id: 'chain', name: 'Block-Optimierung', desc: 'Hash +10 %', cost: 8000, secs: 90 },
-  { id: 'immersion', name: 'Immersionskühlung', desc: 'Hitze −20 %, schaltet den Immersion Tank frei', cost: 6000, secs: 90, req: 'eff' },
-  { id: 'quantum', name: 'Quantum-Hardware', desc: 'Schaltet Quantum Q1 frei', cost: 25000, secs: 180, req: 'immersion' },
-  { id: 'fusion', name: 'Fusionskern', desc: 'Schaltet Fusion Core frei', cost: 120000, secs: 300, req: 'quantum' },
-  { id: 'gridops', name: 'Autonomous Grid', desc: 'Stromverbrauch −12 % und Datacenter Suite freischalten', cost: 58000, secs: 210, req: 'immersion' },
-  { id: 'compression', name: 'Hash Compression', desc: 'Coin-Produktion +18 % und Datacenter Campus freischalten', cost: 145000, secs: 300, req: 'gridops' },
-  { id: 'neural', name: 'Neural Mining', desc: 'Klickwert +45 % und AI Cluster freischalten', cost: 270000, secs: 360, req: 'compression' },
-  { id: 'orbital', name: 'Orbital Scheduling', desc: 'Hashrate +25 %, Orbital Forge und Mega-Farm freischalten', cost: 850000, secs: 480, req: 'fusion' },
+  { id: 'eff', name: 'Effizienz-Firmware', desc: 'Stromverbrauch −10 %', cost: 2400, secs: 79 },
+  { id: 'market', name: 'Marktanalyse', desc: 'Schaltet die Münze Nova frei', cost: 4000, secs: 105 },
+  { id: 'auto', name: 'Auto-Verkauf', desc: 'Verkauft Coins automatisch ab einem Schwellwert', cost: 5600, secs: 105 },
+  { id: 'chain', name: 'Block-Optimierung', desc: 'Hash +10 %', cost: 12800, secs: 158 },
+  { id: 'immersion', name: 'Immersionskühlung', desc: 'Hitze −20 %, schaltet den Immersion Tank frei', cost: 9600, secs: 158, req: 'eff' },
+  { id: 'quantum', name: 'Quantum-Hardware', desc: 'Schaltet Quantum Q1 frei', cost: 40000, secs: 315, req: 'immersion' },
+  { id: 'fusion', name: 'Fusionskern', desc: 'Schaltet Fusion Core frei', cost: 192000, secs: 525, req: 'quantum' },
+  { id: 'gridops', name: 'Autonomous Grid', desc: 'Stromverbrauch −12 % und Datacenter Suite freischalten', cost: 92800, secs: 368, req: 'immersion' },
+  { id: 'compression', name: 'Hash Compression', desc: 'Coin-Produktion +18 % und Datacenter Campus freischalten', cost: 232000, secs: 525, req: 'gridops' },
+  { id: 'neural', name: 'Neural Mining', desc: 'Klickwert +45 % und AI Cluster freischalten', cost: 432000, secs: 630, req: 'compression' },
+  { id: 'orbital', name: 'Orbital Scheduling', desc: 'Hashrate +25 %, Orbital Forge und Mega-Farm freischalten', cost: 1360000, secs: 840, req: 'fusion' },
 ];
 
 export const LOANS = [500, 2500, 10000, 50000];

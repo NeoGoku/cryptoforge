@@ -61,7 +61,7 @@ function box(g: G, u: number, v: number, du: number, dv: number, h: number, c: n
 }
 
 type Kind = 'bed' | 'desk' | 'rack' | 'plant' | 'crate' | 'bench' | 'chair' | 'tank' | 'lamp' | 'purifier' | 'cabinet';
-interface Deco { kind: Kind; u: number; v: number; du: number; dv: number; }
+interface Deco { kind: Kind; u: number; v: number; du: number; dv: number; level?: number; }
 
 const DECOR: Record<string, Deco[]> = {
   kid: [
@@ -123,12 +123,23 @@ function drawDeco(g: G, d: Deco, led: LedFn) {
       box(g, u + 0.1, v + 0.1, du * 0.35, dv - 0.2, 6, 0xf2f2f7, 10);
       box(g, u + du * 0.5, v + 0.05, du * 0.48, dv - 0.1, 3, 0x6d73b0, 10);
       break;
-    case 'desk':
-      box(g, u, v, du, dv, 16, 0x8c90c0, 0, 1);
-      box(g, u + du - 0.55, v + 0.15, 0.4, 0.6, 28, 0x2b2e36, 16);
-      box(g, u + 0.3, v + 0.1, du - 1.2, 0.14, 26, 0x1f2430, 16);
-      led(P(u + 0.3 + (du - 1.2) / 2, v + 0.24, 33).x, P(u + 0.3 + (du - 1.2) / 2, v + 0.24, 33).y, 0x5dff9c, 0.5);
+    case 'desk': {
+      const level = d.level ?? 0;
+      const finish = [0x8c90c0, 0xa7784c, 0x395576, 0x293c4b][level];
+      const screen = level >= 3 ? 0xffc857 : 0x5dff9c;
+      box(g, u, v, du, dv, 16, finish, 0, 1);
+      box(g, u + du - 0.50, v + 0.15, 0.35, 0.55, 26, 0x2b2e36, 16);
+      const count = level >= 2 ? level : 1;
+      const width = (du - 0.6) / count;
+      for (let i = 0; i < count; i++) {
+        const x = u + 0.12 + i * width;
+        box(g, x, v + 0.15, width - 0.06, 0.14, 21, 0x1f2430, 17);
+        const p = P(x + width / 2, v + 0.31, 30);
+        led(p.x, p.y, screen, i);
+      }
+      if (level > 0) box(g, u + 0.45, v + 0.60, 0.52, 0.22, 2, 0xa1b3c2, 16);
       break;
+    }
     case 'chair':
       box(g, u, v, du, dv, 8, 0x4a4f78);
       box(g, u, v + dv - 0.12, du, 0.12, 14, 0x3a3e62, 8);
@@ -525,6 +536,10 @@ export class MainScene extends Phaser.Scene {
     const led: LedFn = (x, y, c, phase) => this.ledPts.push({ x, y, c, phase });
     const items: { d: number; draw: () => void }[] = [];
     const decor = [...(DECOR[room.id] ?? DECOR.dc.filter((d) => d.v < 2.1))];
+    const deskLevel = game.ops.deskLevel(room.id);
+    const desk = decor.find((item) => item.kind === 'desk');
+    if (desk) decor[decor.indexOf(desk)] = { ...desk, level: deskLevel };
+    else if (deskLevel > 0) decor.push({ kind: 'desk', u: 2, v: W - 1.05, du: 2, dv: 0.8, level: deskLevel });
     const owned = game.s.ops.sites[room.id] ?? [];
     if (owned.includes('plant')) decor.push({ kind: 'plant', u: 0.35, v: Math.max(1.5, W - 1.1), du: 0.7, dv: 0.7 });
     if (owned.includes('lighting')) decor.push({ kind: 'lamp', u: W * 0.57, v: 0.02, du: 0.8, dv: 0.15 });
