@@ -8,6 +8,8 @@ import { sfx } from './audio';
 import { settings, saveSettings } from './settings';
 import { escapeHtml, isOpsTab, opsLink, performOpsAction, renderOperations } from './operations-ui';
 import type { OpsTab } from './operations-ui';
+import { CONSUMABLES } from './operations-data';
+import { keys } from './operations-state';
 import { SAVE_SLOTS, slotPreview } from './save-slots';
 
 type Tab = 'shop' | 'build' | 'inv' | 'market' | 'chain' | 'bank' | 'tech' | 'tasks' | 'ach' | 'rooms' | 'ops' | 'more';
@@ -104,12 +106,26 @@ export class HUD {
   private slow = 0;
   private lastTs = performance.now();
 
+  private setTabsOpen(open: boolean) {
+    $('panel').classList.toggle('tabs-open', open);
+    $('tab-toggle').setAttribute('aria-expanded', String(open));
+  }
+
   constructor() {
+    $('tab-toggle').addEventListener('click', () => this.setTabsOpen(!$('panel').classList.contains('tabs-open')));
+    $('panel').addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape' || !$('panel').classList.contains('tabs-open')) return;
+      this.setTabsOpen(false);
+      $('tab-toggle').focus();
+    });
+    window.matchMedia('(max-width: 899px)').addEventListener('change', () => this.setTabsOpen(false));
     $('tabs').addEventListener('click', (e) => {
       const b = (e.target as HTMLElement).closest<HTMLElement>('[data-tab]');
       if (b) {
         sfx.tab();
         this.tab = b.dataset.tab as Tab;
+        if ($('panel').classList.contains('tabs-open')) $('tab-toggle').focus();
+        this.setTabsOpen(false);
         this.renderAll();
         $('content').scrollTop = 0;
       }
@@ -470,6 +486,8 @@ export class HUD {
     this.drawMinis();
   }
 
+  private tabsHtml = '';
+
   private renderTabs() {
     const inv = game.unplaced().length;
     const badge = (k: Tab): string => {
@@ -478,9 +496,15 @@ export class HUD {
       if (k === 'more' && game.canPrestige()) return '<em class="badge">✨</em>';
       return '';
     };
-    const sc = $('tabs').scrollLeft;
-    $('tabs').innerHTML = TABS.map(([k, ic, l]) => `<button data-tab="${k}" class="${k === this.tab ? 'on' : ''}"><i>${ic}</i><span>${l}</span>${badge(k)}</button>`).join('');
-    $('tabs').scrollLeft = sc;
+    const html = TABS.map(([k, icon, label]) => {
+      const selected = k === this.tab;
+      return `<button type="button" data-tab="${k}"${selected ? ' class="on" aria-current="true"' : ''}><i aria-hidden="true">${icon}</i><span>${label}</span>${badge(k)}</button>`;
+    }).join('');
+    if (html !== this.tabsHtml) {
+      $('tabs').innerHTML = this.tabsHtml = html;
+    }
+    const label = TABS.find(([id]) => id === this.tab)?.[2] ?? '';
+    if ($('current-tab').textContent !== label) $('current-tab').textContent = label;
   }
 
   private renderContent(live = false) {
@@ -1059,13 +1083,50 @@ export class HUD {
     if (bar) bar.style.width = `${(d.t / d.total) * 100}%`;
   }
 
-  private renderBoosts() {
-    const html = Object.entries(BOOST_INFO).filter(([id]) => game.boostOn(id)).map(([id, b]) => {
-      const left = game.boostLeft(id);
-      return `<div class="boost glass"><b>${b.icon} ${b.name}</b> ${Math.ceil(left)} s<div class="track"><div class="fill" style="width:${(left / b.total) * 100}%;--b:var(--gold)"></div></div></div>`;
-    }).join('');
-    const el = $('boosts');
-    if (el.innerHTML !== html) el.innerHTML = html;
+  private effectCards = new Map<string, { card: HTMLElement; time: HTMLElement; fill: HTMLElement }>();
+
+  private renderEffects() {
+    const active = Object.entries(BOOST_INFO).map(([id, boost]) => ({
+      id, ...boost, left: game.boostLeft(id), bad: false,
+    }));
+    for (const id of keys(CONSUMABLES)) {
+      const effect = CONSUMABLES[id];
+      active.push({ id: `ops-${id}`, name: effect.name, icon: '⚡', total: effect.sec, left: game.ops.effect(id), bad: false });
+    }
+    const event = game.evInfo();
+    if (event) active.unshift({ ...event, id: `event-${event.id}`, bad: event.id !== 'sale' });
+
+    const visible = new Set<string>();
+    for (const effect of active) {
+      if (effect.left <= 0) continue;
+      visible.add(effect.id);
+      let view = this.effectCards.get(effect.id);
+      if (!view) {
+        const card = document.createElement('div');
+        card.className = effect.bad ? 'boost glass bad' : 'boost glass';
+        card.dataset.effect = effect.id;
+        card.innerHTML = `<div class="boost-label"><b>${effect.icon} ${effect.name}</b><time></time></div><div class="track" aria-hidden="true"><div class="fill"></div></div>`;
+        const time = card.querySelector('time')!;
+        const fill = card.querySelector<HTMLElement>('.fill')!;
+        fill.style.setProperty('--b', effect.bad ? 'var(--hot)' : 'var(--gold)');
+        view = { card, time, fill };
+        this.effectCards.set(effect.id, view);
+        if (effect.id.startsWith('event-')) $('boosts').prepend(card);
+        else $('boosts').append(card);
+      }
+      const seconds = Math.ceil(effect.left);
+      const label = `${seconds} s`;
+      if (view.time.textContent !== label) {
+        view.time.textContent = label;
+        view.time.setAttribute('datetime', `PT${seconds}S`);
+      }
+      view.fill.style.width = `${Math.min(100, effect.left / effect.total * 100)}%`;
+    }
+    for (const [id, view] of this.effectCards) {
+      if (visible.has(id)) continue;
+      view.card.remove();
+      this.effectCards.delete(id);
+    }
   }
 
   private loop() {
@@ -1120,17 +1181,6 @@ export class HUD {
     drawLine($('spark') as HTMLCanvasElement, pts, chg >= 0 ? '#4fd1c5' : '#ff6a3d');
     if (this.tab === 'market' || this.tab === 'more') this.drawMinis();
 
-    // Event-Leiste
-    const ev = game.evInfo();
-    const eb = $('evbar');
-    if (ev) {
-      eb.style.display = '';
-      eb.className = `glass ${ev.id === 'sale' ? '' : 'bad'}`;
-      eb.innerHTML = `${ev.icon} ${ev.name} · ${Math.ceil(ev.left)} s<div class="track"><div class="fill" style="width:${(ev.left / ev.total) * 100}%;--b:${ev.id === 'sale' ? 'var(--gold)' : 'var(--hot)'}"></div></div>`;
-    } else if (eb.style.display !== 'none') {
-      eb.style.display = 'none';
-    }
-
     // Live-Tabs periodisch neu zeichnen (nicht während eines Klicks)
     this.liveT += 0.25;
     // Hardware-Preise im Shop ohne Neuaufbau aktualisieren
@@ -1179,7 +1229,7 @@ export class HUD {
       if (lbl) lbl.textContent = `noch ${dur(left)}`;
     }
 
-    this.renderBoosts();
+    this.renderEffects();
     this.renderDeal();
     const cv = game.clickBase() * game.comboMult() * (game.boostOn('click') ? 10 : 1);
     $('clickVal').textContent = `≈ ${eur(cv)}`;
