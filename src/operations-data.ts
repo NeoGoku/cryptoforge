@@ -36,6 +36,10 @@ export const SITE_SHOP = {
   breakers: { name: 'Industrieverteiler', description: 'Stromverbrauch −8 % im Raum', cost: 800 },
   bench: { name: 'Wartungsstation', description: 'Verschleiß −20 % im Raum', cost: 1200 },
   controller: { name: 'Laststeuerung', description: 'Hashrate +8 % im Raum', cost: 1800 },
+  plant: { name: 'Topfpflanze', description: 'Angenehme Arbeitsatmosphäre · Hashrate +0,35 %', cost: 420 },
+  lighting: { name: 'Indirekte LED-Beleuchtung', description: 'Gute Sicht am Rack · Hashrate +0,6 %', cost: 680 },
+  interior: { name: 'Ergonomisches Interieur', description: 'Aufgeräumter Arbeitsplatz · Hashrate +1,2 %', cost: 1450 },
+  purifier: { name: 'Luftreiniger', description: 'Weniger Staub · Verschleiß −5 %', cost: 950 },
 } as const;
 
 export const SKILLS = {

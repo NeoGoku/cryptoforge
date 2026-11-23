@@ -10,7 +10,7 @@ const art = {
   treasury: new URL('./assets/operations-treasury.webp', import.meta.url).href,
 };
 
-const tabs = { grid: 'Stromnetz', rigs: 'Rigs & Crew', treasury: 'Wallet & Börse', tasks: 'Aufträge', traders: 'Händler', meta: 'Sammlungen & Prestige' };
+const tabs = { grid: 'Stromnetz', rigs: 'Rigs & Crew', rooms: 'Räume & Ausbau', treasury: 'Wallet & Börse', tasks: 'Aufträge', traders: 'Händler', meta: 'Sammlungen & Prestige' };
 export type OpsTab = keyof typeof tabs;
 type ObjectiveTab = 'daily' | 'weekly' | 'projects';
 const walletEvents = { deposit: 'Einzahlung', withdraw: 'Auszahlung', yield: 'Zins' };
@@ -125,6 +125,29 @@ function rigPanel(g: Game) {
   return html;
 }
 
+function roomsPanel(g: Game) {
+  const o = g.ops;
+  let html = header('rigs', 'Räume & Ausbau', 'Produktivität, Wartung und Raumgestaltung');
+  for (const room of ROOMS.filter((r) => !!g.s.rooms[r.id])) {
+    const stats = g.roomStats[room.id];
+    const items = o.s.sites[room.id] ?? [];
+    const wear = Math.round((stats?.wear ?? 1) * 100);
+    html += card(`${room.name}${g.s.active === room.id ? ' · aktiv' : ''}`,
+      item('Miner / Stellplätze', `${g.s.rooms[room.id].filter(Boolean).length} / ${room.spots.length}`)
+      + item('Hashrate / Wartung', `${fmt(stats?.hash ?? 0, 1)} H/s · Verschleißfaktor ${fmt(wear, 0)} %`)
+      + item('Raumzustand', `${fmt(g.s.cond[room.id] ?? 100, 0)} %`)
+      + buttons(act(g.s.active === room.id ? 'Aktiver Raum' : 'Raum öffnen', 'room-select', room.id, false, g.s.active === room.id))
+      + (g.s.cond[room.id] < 95 ? buttons(act(`Raum reparieren · ${eur(g.repairCost(room.id))}`, 'room-repair', room.id, g.s.cash < g.repairCost(room.id))) : '')
+      + section('Einrichtung & Technik')
+      + keys(SITE_SHOP).map((id) => {
+        const entry = SITE_SHOP[id], owned = items.includes(id);
+        return `<div class="cf-ops-upgrade"><span>${escapeHtml(entry.name)}<small>${escapeHtml(entry.description)}</small></span>${act(owned ? 'Installiert' : `Kaufen · ${eur(entry.cost)}`, 'room-site', `${room.id}:${id}`, owned || g.s.cash < entry.cost, owned)}</div>`;
+      }).join(''));
+  }
+  return html + description('Raumgestaltung wirkt dauerhaft auf alle Miner im jeweiligen Raum. Kleine Dekor-Boni addieren sich; Technik-Upgrades bleiben separat sichtbar.')
+    + description('Kompatibilität und Einzelteile findest du in Werkstatt und Komponentenmarkt. Dort zeigt der Konfigurator fehlende oder inkompatible Bauteile vor dem Bau an.');
+}
+
 function treasuryPanel(g: Game) {
   const o = g.ops, s = o.s, tier = o.walletTier();
   const history = s.yieldHistory.slice().reverse();
@@ -221,7 +244,7 @@ function metaPanel(g: Game) {
     }).join('');
 }
 
-const panels = { grid: gridPanel, rigs: rigPanel, treasury: treasuryPanel, tasks: tasksPanel, traders: traderPanel, meta: metaPanel };
+const panels = { grid: gridPanel, rigs: rigPanel, rooms: roomsPanel, treasury: treasuryPanel, tasks: tasksPanel, traders: traderPanel, meta: metaPanel };
 export function renderOperations(g: Game, tab: OpsTab) {
   return `<div class="cf-ops"><nav class="cf-ops-nav" aria-label="Betriebsbereiche">${keys(tabs).map((id) => act(tabs[id], 'tab', id, false, id === tab)).join('')}</nav>${panels[tab](g)}</div>`;
 }
@@ -243,6 +266,9 @@ export function performOpsAction(g: Game, operation: string, id: string) {
     case 'cooling': if (owns(COOLING, id)) o.cooling(g.s.active, id); break;
     case 'layout': if (owns(LAYOUTS, id)) o.layout(g.s.active, id); break;
     case 'site': if (owns(SITE_SHOP, id)) o.buySite(g.s.active, id); break;
+    case 'room-site': if (owns(SITE_SHOP, secondary)) o.buySite(primary, secondary); break;
+    case 'room-select': g.setRoom(id); break;
+    case 'room-repair': g.repairRoom(id); break;
     case 'hire': if (owns(CREW, id)) o.hireCrew(id); break;
     case 'fire': if (owns(CREW, id)) o.hireCrew(id, true); break;
     case 'assign': if (owns(CREW, secondary)) o.assignCrew(primary, secondary); else if (secondary === '-') o.assignCrew(primary); break;

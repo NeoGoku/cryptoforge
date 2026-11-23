@@ -54,6 +54,10 @@
   border-bottom: 1px solid #667a8f;
 }
 .cf-ops-yield span { flex: 0 1 6.5%; background: #f1bb65; border-radius: 3px 3px 0 0; }
+.cf-ops-upgrade { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 0; border-top: 1px solid #536c8533; }
+.cf-ops-upgrade > span { min-width: 0; font-size: 13px; }
+.cf-ops-upgrade small { display: block; margin-top: 2px; color: #9fb0c3; font-size: 11px; }
+.cf-ops-upgrade button { flex: 0 0 auto; }
 
 @media (max-width: 899px) {
   body.operations-open #game, body.operations-open #vig { visibility: hidden; }

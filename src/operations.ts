@@ -234,8 +234,11 @@ export class Operations {
     return {
       heat: siteHeat * COOLING[activeMode].heat,
       power: layout.power * COOLING[activeMode].power * (items.includes('breakers') ? 0.92 : 1),
-      hash: layout.hash * (items.includes('controller') ? 1.08 : 1),
-      wear: items.includes('bench') ? 0.8 : 1,
+      hash: layout.hash * (items.includes('controller') ? 1.08 : 1)
+        * (items.includes('plant') ? 1.0035 : 1)
+        * (items.includes('lighting') ? 1.006 : 1)
+        * (items.includes('interior') ? 1.012 : 1),
+      wear: (items.includes('bench') ? 0.8 : 1) * (items.includes('purifier') ? 0.95 : 1),
     };
   }
 
