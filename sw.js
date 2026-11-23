@@ -1,6 +1,6 @@
 // Fetch current releases first and keep the matching static assets for offline play.
 const PREFIX = 'cryptoforge-';
-const CACHE = PREFIX + 'v3';
+const CACHE = PREFIX + 'v4';
 self.addEventListener('install', (event) => event.waitUntil(self.skipWaiting()));
 self.addEventListener('activate', (event) => {
   event.waitUntil(caches.keys().then((keys) => Promise.all(
