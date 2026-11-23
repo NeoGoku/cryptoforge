@@ -60,7 +60,7 @@ function box(g: G, u: number, v: number, du: number, dv: number, h: number, c: n
   }
 }
 
-type Kind = 'bed' | 'desk' | 'rack' | 'plant' | 'crate' | 'bench' | 'chair' | 'tank';
+type Kind = 'bed' | 'desk' | 'rack' | 'plant' | 'crate' | 'bench' | 'chair' | 'tank' | 'lamp' | 'purifier' | 'cabinet';
 interface Deco { kind: Kind; u: number; v: number; du: number; dv: number; }
 
 const DECOR: Record<string, Deco[]> = {
@@ -154,7 +154,7 @@ function drawDeco(g: G, d: Deco, led: LedFn) {
       box(g, u, v, du, dv, 20, 0x6b5a4a, 0, 1);
       box(g, u + 0.3, v + 0.2, 0.5, 0.5, 8, 0x9aa0b4, 20);
       break;
-    case 'plant': {
+      case 'plant': {
       box(g, u, v, du, dv, 12, 0xa0522d);
       const c = P(u + du / 2, v + dv / 2, 12);
       g.fillStyle(0x2d7a37, 1);
@@ -165,6 +165,26 @@ function drawDeco(g: G, d: Deco, led: LedFn) {
       g.fillCircle(c.x - 8 * zoom, c.y - 22 * zoom, 4 * zoom);
       break;
     }
+    case 'lamp': {
+      const p = P(u + du / 2, 0, 72);
+      g.fillStyle(0x352c20, 1);
+      g.fillPoints([P(u, 0, 82), P(u + du, 0, 82), P(u + du, 0, 66), P(u, 0, 66)], true);
+      g.fillStyle(0xffd479, 1);
+      g.fillPoints([P(u + 0.12, 0, 78), P(u + du - 0.12, 0, 78), P(u + du - 0.12, 0, 70), P(u + 0.12, 0, 70)], true);
+      g.fillStyle(0xffd479, 0.12);
+      g.fillCircle(p.x, p.y + 14 * zoom, 25 * zoom);
+      led(p.x, p.y, 0xffd479, u);
+      break;
+    }
+    case 'purifier':
+      box(g, u, v, du, dv, 34, 0x4c7181, 0, 3);
+      led(P(u + du / 2, v + dv, 27).x, P(u + du / 2, v + dv, 27).y, 0x7af5ff, u);
+      break;
+    case 'cabinet':
+      box(g, u, v, du, dv, 45, 0x665846, 0, 2);
+      g.lineStyle(1 * DPR, 0xd9bd8d, 0.8);
+      line(g, P(u + du / 2, v + dv, 6), P(u + du / 2, v + dv, 38));
+      break;
   }
 }
 
@@ -504,7 +524,12 @@ export class MainScene extends Phaser.Scene {
     // Objekte, nach Tiefe sortiert
     const led: LedFn = (x, y, c, phase) => this.ledPts.push({ x, y, c, phase });
     const items: { d: number; draw: () => void }[] = [];
-    const decor = DECOR[room.id] ?? DECOR.dc.filter((d) => d.v < 2.1);
+    const decor = [...(DECOR[room.id] ?? DECOR.dc.filter((d) => d.v < 2.1))];
+    const owned = game.s.ops.sites[room.id] ?? [];
+    if (owned.includes('plant')) decor.push({ kind: 'plant', u: 0.35, v: Math.max(1.5, W - 1.1), du: 0.7, dv: 0.7 });
+    if (owned.includes('lighting')) decor.push({ kind: 'lamp', u: W * 0.57, v: 0.02, du: 0.8, dv: 0.15 });
+    if (owned.includes('interior')) decor.push({ kind: 'cabinet', u: W * 0.64, v: 0.35, du: 0.85, dv: 0.7 });
+    if (owned.includes('purifier')) decor.push({ kind: 'purifier', u: Math.max(0.2, W - 1.15), v: 0.5, du: 0.65, dv: 0.65 });
     for (const d of decor) {
       items.push({ d: d.u + d.v + (d.du + d.dv) / 2, draw: () => drawDeco(g, d, led) });
       if (room.id === 'kid' && d.kind === 'chair') {
