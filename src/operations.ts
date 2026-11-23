@@ -329,6 +329,15 @@ export class Operations {
     this.changed();
   }
 
+  ensureRigTarget(id: string, roomCoin: CoinDef) {
+    const current = this.rigCoin(id, roomCoin);
+    if (this.game.coinUnlocked(current) && this.game.canMine(id, current.id)) return;
+    const device = this.game.mstat(id);
+    const candidates = COINS.filter((coin) => this.game.coinUnlocked(coin) && this.game.canMine(device, coin.id));
+    candidates.sort((a, b) => this.game.netPerSec(device, b.id) - this.game.netPerSec(device, a.id));
+    if (candidates.length) this.rig(id).target = candidates[0].id;
+  }
+
   rigCoin(id: string, fallback: CoinDef) {
     const target = this.s.rigs[id]?.target;
     if (target && this.game.coinUnlocked(coinDef(target)) && this.game.canMine(id, target)) return coinDef(target);

@@ -1,7 +1,7 @@
 import { game, MISSIONS, ACHIEVEMENTS, INSURE_RATE, LOAN_RATE, POOL_FEE, BOOST_INFO, OD_MAX } from './game';
 import { ROOMS, UPGRADES, STAFF, TECHS, COINS, LOANS, DEFAULT_COIN, upgradeCost, staffCost, coinDef, techDef } from './config';
 import type { Kind } from './config';
-import { PARTS, PREBUILT, CATS, CAT_ORDER, partDef, prebuiltDef, partLabel, partIcon, machineIcon, buildStats } from './hardware';
+import { BUILD_PRESETS, PARTS, PREBUILT, CATS, CAT_ORDER, partDef, prebuiltDef, partLabel, partIcon, machineIcon, buildStats } from './hardware';
 import type { PartCat, PartDef, HwMarket, MachineStat } from './hardware';
 import { holderValue, shortAddr } from './world';
 import { sfx } from './audio';
@@ -29,6 +29,7 @@ const dur = (s: number) => (s >= 3600 ? `${Math.floor(s / 3600)} h ${Math.floor(
 class Counter {
   cur = NaN;
   target = 0;
+  private displayed = '';
   constructor(private el: HTMLElement, private fmt: (n: number) => string, private flash = false) {}
   set(t: number) {
     if (Number.isNaN(this.cur)) this.cur = t;
@@ -44,7 +45,8 @@ class Counter {
   tick() {
     const d = this.target - this.cur;
     this.cur = Math.abs(d) < 1e-7 ? this.target : this.cur + d * 0.16;
-    this.el.textContent = this.fmt(this.cur);
+    const text = this.fmt(this.cur);
+    if (text !== this.displayed) this.el.textContent = this.displayed = text;
   }
 }
 
@@ -56,12 +58,16 @@ const title = (t: string) => `<div class="sectitle">${t}</div>`;
 
 function drawLine(c: HTMLCanvasElement, pts: number[], color: string, fill = true) {
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
-  const w = c.clientWidth || c.width;
-  const h = c.clientHeight || c.height;
-  if (c.width !== Math.round(w * dpr)) { c.width = Math.round(w * dpr); c.height = Math.round(h * dpr); }
+  const w = c.clientWidth;
+  const h = c.clientHeight;
+  if (!w || !h) return;
+  const width = Math.min(2048, Math.round(w * dpr));
+  const height = Math.min(256, Math.round(h * dpr));
+  if (c.width !== width) c.width = width;
+  if (c.height !== height) c.height = height;
   const ctx = c.getContext('2d');
   if (!ctx || pts.length < 2) return;
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.setTransform(width / w, 0, 0, height / h, 0, 0);
   ctx.clearRect(0, 0, w, h);
   const min = Math.min(...pts);
   const max = Math.max(...pts);
@@ -280,6 +286,46 @@ export class HUD {
     });
   }
 
+  private placementModal(id: string) {
+    const machine = game.s.machines[id];
+    if (!machine) return;
+    const rooms = ROOMS.filter((room) => game.s.rooms[room.id]);
+    const source = game.roomOf(id);
+    const activeHasSpace = game.s.rooms[game.s.active]?.includes(null);
+    const initial = activeHasSpace ? game.s.active : rooms.find((room) => game.s.rooms[room.id].includes(null))?.id ?? game.s.active;
+    this.modal(`<h2>${source ? 'Miner umziehen' : 'Miner aufstellen'}</h2>
+      <p>${escapeHtml(machine.name)}</p>
+      <label class="placement-field">Zielraum<select id="placement-room">${rooms.map((room) => {
+        const free = game.s.rooms[room.id].filter((slot) => slot === null).length;
+        return `<option value="${room.id}" ${room.id === initial ? 'selected' : ''}>${room.name} · ${free} frei</option>`;
+      }).join('')}</select></label>
+      <p class="muted">Wähle einen Stellplatz. Bei einem belegten Platz wird getauscht. Stand dein Miner im Lager, kommt der andere Miner dorthin.</p>
+      <div class="slot-grid" id="placement-slots"></div>
+      <div class="btns"><button id="cancel-place">Abbrechen</button></div>`, (root) => {
+      const room = root.querySelector<HTMLSelectElement>('#placement-room')!;
+      const slots = root.querySelector<HTMLElement>('#placement-slots')!;
+      const render = () => {
+        slots.innerHTML = game.s.rooms[room.value].map((occupant, idx) => `
+          <button data-slot-index="${idx}" ${occupant === id ? 'disabled' : !occupant ? 'class="primary"' : ''}>
+            Platz ${idx + 1}<span class="placement-status">${occupant === id ? 'Hier aufgestellt' : occupant ? `Tausch · ${escapeHtml(game.s.machines[occupant]?.name ?? '')}` : 'Frei'}</span>
+          </button>`).join('');
+      };
+      room.addEventListener('change', render);
+      slots.addEventListener('click', (event) => {
+        if (!(event.target instanceof Element)) return;
+        const button = event.target.closest<HTMLButtonElement>('button[data-slot-index]');
+        if (!button || button.disabled) return;
+        if (game.placeItem(id, room.value, Number(button.dataset.slotIndex), true)) {
+          this.closeModal();
+          sfx.place();
+          this.toast(`Aufgestellt in ${ROOMS.find((entry) => entry.id === room.value)!.name}.`);
+        }
+      });
+      root.querySelector('#cancel-place')!.addEventListener('click', () => this.closeModal());
+      render();
+    });
+  }
+
   private restructureModal() {
     this.modal(`<h2>Betrieb neu aufbauen</h2>
       <p>35 % deiner eigenen Miner (aufgerundet, Starter-PC ausgenommen) werden eingezogen. Leasinggeräte gehen zurück und die Rig-Crew wird aufgelöst. Du wechselst ins Kinderzimmer und erhältst mindestens 350 € Bargeld. Betriebsrückstände entfallen. Bankkredite laufen weiter.</p>
@@ -362,14 +408,22 @@ export class HUD {
       case 'draft-gpu-sub': game.removeDraftGpuOf(id); break;
       case 'draft-gpu-fill': game.fillDraftGpu(id); break;
       case 'draft-clear': game.clearDraft(); break;
-      case 'build': if (game.buildDraft(this.bpName)) this.bpName = ''; break;
+      case 'draft-preset': game.loadBuildPreset(id); break;
+      case 'build':
+        if (game.buildDraft(this.bpName)) {
+          this.bpName = '';
+          const name = document.querySelector<HTMLInputElement>('#bpname');
+          if (name) name.value = '';
+        }
+        break;
       case 'bp-save': game.saveBlueprint(this.bpName); this.bpName = ''; break;
       case 'bp-load': game.loadBlueprint(id); break;
       case 'bp-build': game.buildBlueprint(id); break;
       case 'bp-del': game.deleteBlueprint(id); break;
       case 'bp-from': game.blueprintFrom(id); break;
+      case 'open-inventory': this.tab = 'inv'; this.renderAll(); $('content').scrollTop = 0; break;
       case 'place': game.placeItem(); break;
-      case 'place-m': game.placeItem(id); break;
+      case 'place-m': this.placementModal(id); break;
       case 'unplace': game.unplace(id); break;
       case 'edit-m': game.dismantle(id, true); this.tab = 'build'; this.renderAll(); break;
       case 'dismantle': game.dismantle(id); break;
@@ -504,8 +558,8 @@ export class HUD {
     let h = this.hwIndex() + `<div class="seg"><button data-act="shop-seg" data-seg="parts" class="${this.shopSeg === 'parts' ? 'on' : ''}">🧩 Komponenten</button><button data-act="shop-seg" data-seg="pre" class="${this.shopSeg === 'pre' ? 'on' : ''}">📦 Fertig-Miner</button></div>`;
     if (sale) h += '<div class="lockmsg" style="color:var(--gold);margin-bottom:8px">🏷️ Hardware-Sale: alles −30 %!</div>';
     if (this.shopSeg === 'pre') {
-      const full = game.totalGadgets() >= game.maxGadgets();
-      if (full) h += `<div class="lockmsg" style="margin-bottom:8px">Alle ${game.maxGadgets()} Plätze belegt – verkaufe einen Miner oder erweitere einen Raum.</div>`;
+      const full = game.totalGadgets() >= game.machineLimit();
+      if (full) h += `<div class="lockmsg" style="margin-bottom:8px">Lagerreserve voll · ${game.machineLimit()} Miner gesamt</div>`;
       return h + PREBUILT.map((p) => {
         const locked = !game.unlocked(p);
         const cost = game.prePrice(p.id);
@@ -574,6 +628,9 @@ export class HUD {
     const loadRatio = st.cap ? st.dc / st.cap : 0;
     const ok = st.problems.length === 0;
     let h = `<div class="muted" style="margin:0 2px 8px">Wähle die Teile. Vorhandene Lagerteile werden zuerst verbaut, fehlende Teile beim Zusammenbau gekauft.</div>`;
+    h += `<div class="chips" aria-label="Bauvorlagen">${BUILD_PRESETS.map((preset) => `
+      <button data-act="draft-preset" data-id="${preset.id}">${preset.name} <small>${eur(game.missingCost(preset.build).cost)}</small></button>
+    `).join('')}</div>`;
     h += `<div class="card" style="--c:${ok ? 'var(--acc)' : 'var(--hot)'}">
       <div class="head">${machineIcon(st)}<div style="flex:1"><div class="name">${st.name}</div><div class="muted">${KIND_NAME[st.kind]} · ${st.model === 'rig' ? 'offener Rig' : 'Tower-PC'}</div></div></div>
       <div class="bars" style="margin-top:6px">
@@ -585,11 +642,12 @@ export class HUD {
       ${st.problems.map((p) => `<div class="lockmsg">⚠️ ${p}</div>`).join('')}
       <div class="muted" style="margin-top:6px">Netto €/s: ${html}</div>
       ${ok && best > 0 && cost > 0 ? `<div class="muted">Amortisation der neuen Teile ca. ${num(cost / best / 60, 1)} min</div>` : ''}
-      <input id="bpname" class="txt" placeholder="Name (optional)" maxlength="32" value="${this.bpName.replace(/"/g, '&quot;')}">
+      <input id="bpname" class="txt" placeholder="Name (optional)" maxlength="32" value="${escapeHtml(this.bpName)}">
       <div class="btns">
         <button class="primary" data-act="build" ${ok ? '' : 'disabled'} data-cost="${cost}" data-locked="${ok ? 0 : 1}">🔧 Zusammenbauen${missing.length ? ` · ${eur(cost)}` : ' (alles im Lager)'}</button>
         <button data-act="bp-save" ${ok ? '' : 'disabled'}>💾 Blueprint</button>
         <button data-act="draft-clear">Leeren</button>
+        <button data-act="open-inventory">Lager &amp; Stellplätze</button>
       </div>
       ${missing.length ? `<div class="muted" style="margin-top:4px">Wird gekauft: ${missing.map((id) => shortName(partDef(id))).join(', ')}</div>` : ''}
     </div>`;
@@ -614,13 +672,15 @@ export class HUD {
       const st = game.mstat(id);
       const parts = m.build ? [...Object.values(m.build.parts).map((p) => shortName(partDef(p!))), m.build.gpus.length ? `${m.build.gpus.length}× GPU` : ''].filter(Boolean).join(' · ') : prebuiltDef(m.pre!).brand;
       return `<div class="card" style="--c:${hex(st.ledColor)}"><div class="head">${machineIcon(st)}<div style="flex:1"><div class="name">${escapeHtml(m.name)}</div><div class="muted">${num(st.hash, 1)} H/s · ${num(st.watts)} W · Hitze ${num(st.heat, 1)} · ${KIND_NAME[st.kind]}</div><div class="muted" style="font-size:11px">${parts}</div></div></div>
-        <div class="btns">${placed ? `<button data-act="unplace" data-id="${id}">Ins Lager</button>` : `<button class="primary" data-act="place-m" data-id="${id}" ${free === 0 ? 'disabled' : ''}>Aufstellen</button>`}
+        ${placed ? `<div class="muted placement-status">Platz ${game.s.rooms[placed].indexOf(id) + 1} · Coin ${game.ops.rigCoin(id, coinDef(game.s.roomCoin[placed] ?? DEFAULT_COIN)).id}</div>` : ''}
+        <div class="btns"><button class="primary" data-act="place-m" data-id="${id}">${placed ? 'Umziehen / tauschen' : 'Aufstellen'}</button>${placed ? `<button data-act="unplace" data-id="${id}">Ins Lager</button>` : ''}
         ${m.build ? `<button data-act="edit-m" data-id="${id}">Bearbeiten</button><button data-act="bp-from" data-id="${id}">💾</button>${placed ? '' : `<button data-act="dismantle" data-id="${id}">Zerlegen</button>`}` : ''}
         ${game.s.ops.leases[id] ? opsLink('rigs', 'Leasing verwalten') : placed ? '' : `<button data-act="sell-m" data-id="${id}">Verk. ${eur(game.machineSellValue(m))}</button>`}</div></div>`;
     };
-    let h = `<div class="sect">${room.name} · ${slots.length - free}/${slots.length} Slots belegt · ${game.totalGadgets()}/${game.maxGadgets()} Miner gesamt</div>
-      <button class="primary" style="width:100%;margin-bottom:10px" data-act="place" ${free === 0 || loose.length === 0 ? 'disabled' : ''}>Besten Miner aufstellen</button>`;
-    h += title(`Miner im Lager (${loose.length})`) + (loose.map((m) => card(m.id, null)).join('') || '<div class="muted" style="padding:6px 2px">Keine. Baue einen in der Werkstatt oder kaufe einen Fertig-Miner.</div>');
+    let h = `<div class="sect">${game.placedCount()}/${game.maxGadgets()} Stellplätze belegt · ${game.totalGadgets()}/${game.machineLimit()} Miner gesamt</div>
+      <div class="chips" aria-label="Freie Stellplätze">${ROOMS.filter((r) => game.s.rooms[r.id]).map((r) => `<button data-act="room" data-id="${r.id}" class="${r.id === room.id ? 'on' : ''}">${r.name} · ${game.s.rooms[r.id].filter((id) => id === null).length} frei</button>`).join('')}</div>
+      ${free > 0 && loose.length > 0 ? `<div class="btns"><button data-act="place">Besten Miner direkt in ${room.name} aufstellen</button></div>` : ''}`;
+    h += title(`Miner im Lager (${loose.length})`) + (loose.map((m) => card(m.id, null)).join('') || '<div class="muted" style="padding:6px 2px">Keine freien Miner im Lager. Bereits aufgestellte PCs stehen in der Raumliste.</div>');
     for (const r of ROOMS) {
       const ids = (game.s.rooms[r.id] ?? []).filter((x): x is string => !!x);
       if (ids.length) h += title(`${r.name} (${ids.length})`) + ids.map((id) => card(id, r.id)).join('');
@@ -967,6 +1027,7 @@ export class HUD {
     $('dock').style.top = mobileOps ? `${top}px` : '';
     if (mobileOps || (!settings.scene && window.innerWidth < 900)) p.style.top = `${Math.round($('dock').getBoundingClientRect().bottom + 6)}px`;
     else p.style.top = '';
+    window.dispatchEvent(new Event('cryptoforge:layout'));
   }
 
   private dealKey = '';

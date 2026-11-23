@@ -1,6 +1,6 @@
 import { ROOMS, COINS, LOANS, UPGRADES, DEFAULT_COIN, canMine, roomDef, upgradeDef, upgradeCost, coinDef, techDef, staffDef, staffCost } from './config';
 import type { CoinDef, Kind } from './config';
-import { PARTS, PREBUILT, CATS, partDef, prebuiltDef, buildStats, machineStats, buildPartList, emptyBuild, cloneBuild } from './hardware';
+import { BUILD_PRESETS, PARTS, PREBUILT, CATS, partDef, prebuiltDef, buildStats, machineStats, buildPartList, emptyBuild, cloneBuild } from './hardware';
 import type { Machine, MachineStat, Blueprint, Build, PartCat, HwMarket } from './hardware';
 import { makeHolders, makeAddr, holderValue, shortAddr } from './world';
 import type { Holder } from './world';
@@ -449,6 +449,10 @@ export class Game {
     let n = 0;
     for (const id in this.s.rooms) n += this.s.rooms[id].filter(Boolean).length;
     return n;
+  }
+
+  machineLimit(): number {
+    return this.maxGadgets() + 6;
   }
 
   maxGadgets(): number {
@@ -1133,14 +1137,15 @@ export class Game {
   // ---- Aktionen ----
 
   private hasSpace(): boolean {
-    if (this.totalGadgets() >= this.maxGadgets()) {
-      this.toast('Keine freien Plätze – erweitere einen Raum oder verkaufe einen Miner.');
+    if (this.totalGadgets() >= this.machineLimit()) {
+      this.toast('Die Lagerreserve ist voll. Verkaufe einen Miner oder schalte einen weiteren Raum frei.');
       return false;
     }
     return true;
   }
 
   private newMachine(m: Omit<Machine, 'id'>): Machine {
+    while (this.s.machines[`m${this.s.mid}`]) this.s.mid++;
     const id = `m${this.s.mid++}`;
     const mm = { ...m, id };
     this.s.machines[id] = mm;
@@ -1152,7 +1157,10 @@ export class Game {
   private autoPlace(id: string) {
     const slots = this.s.rooms[this.s.active];
     const idx = slots ? slots.indexOf(null) : -1;
-    if (idx >= 0) slots[idx] = id;
+    if (idx < 0) return false;
+    slots[idx] = id;
+    this.ops.ensureRigTarget(id, this.roomDefaultCoin(this.s.active));
+    return true;
   }
 
   private addPart(id: string, n: number) {
@@ -1276,7 +1284,17 @@ export class Game {
 
   /** Konfiguration zusammenbauen: Lagerteile verwenden, fehlende Teile automatisch kaufen. */
   buildDraft(name?: string): boolean {
-    const b = this.s.draft;
+    return this.assemble(this.s.draft, name);
+  }
+
+  loadBuildPreset(id: string) {
+    const preset = BUILD_PRESETS.find((entry) => entry.id === id);
+    if (!preset) return;
+    this.s.draft = cloneBuild(preset.build);
+    this.afterChange();
+  }
+
+  private assemble(b: Build, name?: string): boolean {
     const st = buildStats(b);
     if (st.problems.length) { this.toast(`Kein Zusammenbau möglich: ${st.problems[0]}.`); return false; }
     for (const id of buildPartList(b)) if (!this.unlocked(partDef(id))) { this.toast('Noch nicht erforscht.'); return false; }
@@ -1289,8 +1307,9 @@ export class Game {
     for (const id of buildPartList(b)) this.addPart(id, -1);
     const m = this.newMachine({ name: name?.trim() || st.name, build: cloneBuild(b) });
     this.s.stats.built++;
-    this.autoPlace(m.id);
-    this.toast(`Zusammengebaut: ${m.name}`);
+    const placed = this.autoPlace(m.id);
+    const location = placed ? roomDef(this.s.active).name : 'Lager';
+    this.toast(`Zusammengebaut: ${m.name} · ${location}`);
     this.fx('repair');
     this.afterChange();
     return true;
@@ -1315,11 +1334,7 @@ export class Game {
   buildBlueprint(id: string) {
     const bp = this.s.blueprints.find((x) => x.id === id);
     if (!bp) return;
-    const keep = this.s.draft;
-    this.s.draft = cloneBuild(bp.build);
-    const ok = this.buildDraft(bp.name);
-    this.s.draft = keep;
-    if (!ok) this.afterChange();
+    this.assemble(bp.build, bp.name);
   }
 
   deleteBlueprint(id: string) {
@@ -1345,21 +1360,40 @@ export class Game {
     return list[0]?.id ?? null;
   }
 
-  placeItem(id?: string) {
-    const slots = this.s.rooms[this.s.active];
-    if (!slots) return;
-    const idx = slots.indexOf(null);
-    if (idx < 0) {
-      this.toast('Raum ist voll.');
-      return;
+  private roomDefaultCoin(room: string): CoinDef {
+    return coinDef(this.s.roomCoin[room] ?? DEFAULT_COIN);
+  }
+
+  placeItem(id?: string, room = this.s.active, slot?: number, swap = false): boolean {
+    const slots = this.s.rooms[room];
+    if (!slots) return false;
+    const index = slot ?? slots.indexOf(null);
+    if (!Number.isInteger(index) || index < 0 || index >= slots.length) {
+      this.toast('Kein freier Stellplatz. Wähle im Lager unter „Aufstellen“ einen Raum oder tausche zwei PCs.');
+      return false;
     }
     const mid = id ?? this.bestUnplaced();
-    if (!mid || !this.s.machines[mid] || this.roomOf(mid)) {
+    if (!mid || !this.s.machines[mid]) {
       this.toast('Kein Miner im Lager.');
-      return;
+      return false;
     }
-    slots[idx] = mid;
+    const occupied = slots[index] ?? null;
+    if (occupied === mid) return false;
+    if (occupied && !swap) {
+      this.toast('Dieser Stellplatz ist belegt.');
+      return false;
+    }
+    const source = this.roomOf(mid);
+    if (source) {
+      const sourceSlots = this.s.rooms[source];
+      sourceSlots[sourceSlots.indexOf(mid)] = occupied;
+      if (occupied) this.ops.ensureRigTarget(occupied, this.roomDefaultCoin(source));
+    }
+    slots[index] = mid;
+    this.ops.ensureRigTarget(mid, this.roomDefaultCoin(room));
+    this.s.active = room;
     this.afterChange();
+    return true;
   }
 
   /** Miner aus dem Raum ins Lager nehmen. */
@@ -1372,19 +1406,10 @@ export class Game {
 
   toggleSlot(idx: number) {
     const slots = this.s.rooms[this.s.active];
-    if (!slots) return;
-    if (slots[idx]) {
-      slots[idx] = null;
-      this.afterChange();
-      return;
-    }
-    const id = this.bestUnplaced();
-    if (!id) {
-      this.toast('Kein Miner im Lager. Baue einen in der Werkstatt.');
-      return;
-    }
-    slots[idx] = id;
-    this.afterChange();
+    if (!slots || !Number.isInteger(idx) || idx < 0 || idx >= slots.length) return;
+    const id = slots[idx];
+    if (id) this.unplace(id);
+    else this.placeItem(undefined, this.s.active, idx);
   }
 
   roomRequirement(id: string): string {
@@ -1727,11 +1752,23 @@ export class Game {
     // Unbekannte Teile (z. B. aus älteren Versionen) entfernen
     const known = (id: string) => PARTS.some((p) => p.id === id);
     for (const id of Object.keys(m.parts)) if (!known(id)) delete m.parts[id];
-    for (const r of ROOMS) {
-      const slots = m.rooms[r.id];
-      if (slots && slots.length !== r.spots.length) m.rooms[r.id] = Array.from({ length: r.spots.length }, (_, i) => slots[i] ?? null);
-      if (slots) m.rooms[r.id] = m.rooms[r.id].map((x) => (x && m.machines[x] ? x : null));
+    const assigned = new Set<string>();
+    for (const room of Object.keys(m.rooms)) {
+      const r = ROOMS.find((entry) => entry.id === room);
+      const slots = m.rooms[room];
+      if (!r || !Array.isArray(slots)) {
+        delete m.rooms[room];
+        continue;
+      }
+      m.rooms[room] = Array.from({ length: r.spots.length }, (_, idx) => {
+        const id = slots[idx];
+        if (!id || !Object.prototype.hasOwnProperty.call(m.machines, id) || assigned.has(id)) return null;
+        assigned.add(id);
+        return id;
+      });
     }
+    m.rooms.kid ??= Array.from({ length: roomDef('kid').spots.length }, () => null);
+    if (!Number.isSafeInteger(m.mid) || m.mid < 1 || m.mid >= Number.MAX_SAFE_INTEGER) m.mid = 1;
     // Coin-Mindesthashrate: Räume, deren Geräte den gewählten Coin nicht schaffen, auf einen passenden Coin umstellen
     for (const r of ROOMS) {
       const items = (m.rooms[r.id] ?? []).filter((x): x is string => !!x).map((id) => machineStats(m.machines[id]));

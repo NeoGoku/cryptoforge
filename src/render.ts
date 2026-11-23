@@ -209,6 +209,25 @@ export class MainScene extends Phaser.Scene {
       this.input.setDefaultCursor(h ? 'pointer' : 'default');
     });
     this.scale.on('resize', () => this.refresh());
+    let layoutFrame = 0;
+    const scheduleLayout = () => {
+      if (layoutFrame) return;
+      layoutFrame = requestAnimationFrame(() => {
+        layoutFrame = 0;
+        this.refresh();
+      });
+    };
+    const layout = new ResizeObserver(scheduleLayout);
+    window.addEventListener('cryptoforge:layout', scheduleLayout);
+    for (const id of ['top', 'dock', 'panel']) {
+      const element = document.getElementById(id);
+      if (element) layout.observe(element);
+    }
+    this.events.once('shutdown', () => {
+      layout.disconnect();
+      cancelAnimationFrame(layoutFrame);
+      window.removeEventListener('cryptoforge:layout', scheduleLayout);
+    });
     game.on('change', () => this.refresh());
     game.on('fx', (n) => this.onFx(n ?? ''));
     this.refresh();
@@ -218,6 +237,7 @@ export class MainScene extends Phaser.Scene {
     const dt = delta / 1000;
     game.update(dt);
     this.t += dt;
+    if (!settings.scene || (window.innerWidth < 900 && document.body.classList.contains('operations-open'))) return;
     const powered = game.running() && game.grid.throttle > 0;
     const w = this.scale.width;
     const h = this.scale.height;
@@ -385,12 +405,16 @@ export class MainScene extends Phaser.Scene {
     const h = this.scale.height / DPR;
     const wide = w >= 900;
     const room = roomDef(game.s.active);
+    const bounds = (id: string) => document.getElementById(id)?.getBoundingClientRect();
+    const panel = bounds('panel');
+    const quest = bounds('quest');
+    const dock = bounds('dock');
+    const right = wide ? Math.max(40, (panel?.left ?? w) - 8) : w;
+    const left = wide && right >= 670 ? Math.min(280, (quest?.right ?? 0) + 10) : 0;
+    const top = Math.max(0, (bounds('top')?.bottom ?? 78) + 8, wide && left === 0 ? (quest?.bottom ?? 0) + 6 : 0);
+    const bottom = Math.min(h, dock?.top ?? h) - 6;
+    const z = Math.max(0.12, Math.min(((right - left) * 0.92) / (room.size * TW), ((bottom - top) * 0.94) / (WALL + room.size * TH), 2.2));
     const W = room.size;
-    const left = wide ? 280 : 0;
-    const right = wide ? w - 356 : w;
-    const top = wide ? 84 : 96;
-    const bottom = wide ? h - 150 : h * 0.66 - 170;
-    const z = Math.max(0.3, Math.min(((right - left) * 0.9) / (W * TW), ((bottom - top) * 0.88) / (WALL + W * TH), 2.2));
     zoom = z * DPR;
     ox = ((left + right) / 2) * DPR;
     oy = ((top + bottom) / 2 - ((W * TH - WALL) * z) / 2) * DPR;
@@ -591,7 +615,15 @@ export class MainScene extends Phaser.Scene {
 
   private findHit(p: Phaser.Input.Pointer): Hit | undefined {
     if (!game.s.rooms[game.s.active]) return undefined;
-    return this.hits.find((h) => Math.abs(p.x - h.x) < 34 * zoom && Math.abs(p.y - h.y) < 36 * zoom);
+    const slots = game.s.rooms[game.s.active];
+    for (let i = this.hits.length - 1; i >= 0; i--) {
+      const hit = this.hits[i];
+      const x = Math.abs(p.x - hit.x) / zoom;
+      const y = (p.y - hit.y) / zoom - 11;
+      if (x / (TW * 0.6) + Math.abs(y) / (TH * 0.6) <= 1) return hit;
+      if (slots[hit.idx] && x <= 22 && y < 0 && y >= -64) return hit;
+    }
+    return undefined;
   }
 
   private onPress(p: Phaser.Input.Pointer) {
@@ -601,7 +633,7 @@ export class MainScene extends Phaser.Scene {
       const slots = game.s.rooms[game.s.active];
       const before = slots[hit.idx];
       game.toggleSlot(hit.idx);
-      if (slots[hit.idx] !== before) {
+      if (game.s.rooms[game.s.active][hit.idx] !== before) {
         sfx.place();
         this.burst(hit.x, hit.y, before ? 0xffc857 : 0x4fd1c5, 14);
       }

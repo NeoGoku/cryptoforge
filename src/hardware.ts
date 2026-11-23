@@ -119,6 +119,12 @@ export interface Build {
   gpus: string[];
 }
 
+export const BUILD_PRESETS: { id: string; name: string; build: Build }[] = [
+  { id: 'budget', name: 'Budget-PC', build: { parts: { case: 'case_office', board: 'mb_t1', cpu: 'cpu_c4', ram: 'ram8', ssd: 'ssd128', psu: 'psu450' }, gpus: ['g_k210'] } },
+  { id: 'etra', name: 'Etra-Tower', build: { parts: { case: 'case_gamer', board: 'mb_g2', cpu: 'cpu_c6', ram: 'ram16', ssd: 'ssd128', psu: 'psu750', cool: 'cl_air' }, gpus: ['g_k340', 'g_k340'] } },
+  { id: 'open', name: '4-GPU-Rig', build: { parts: { case: 'case_frame6', board: 'mb_m6', cpu: 'cpu_c6', ram: 'ram16', ssd: 'ssd1t', psu: 'psu1200', cool: 'cl_air' }, gpus: ['g_vx460', 'g_vx460', 'g_vx460', 'g_vx460'] } },
+];
+
 export interface Machine {
   id: string;
   name: string;
