@@ -302,6 +302,8 @@ export class MainScene extends Phaser.Scene {
       }
     }
 
+    this.drawRoomActivity(g);
+
     // Lüfter
     const rate = powered ? 9 : 0;
     this.fanAngle += dt * rate;
@@ -694,6 +696,66 @@ export class MainScene extends Phaser.Scene {
 
   private shake(ms: number, k: number) {
     if (settings.shake) this.cameras.main.shake(ms, k);
+  }
+
+  private drawRoomActivity(g: G) {
+    const room = roomDef(game.s.active);
+    const slots = game.s.rooms[room.id];
+    const powered = game.running() && game.grid.throttle > 0;
+    for (const hit of this.hits) {
+      const id = slots?.[hit.idx];
+      if (!id) continue;
+      const status = game.rigStatus(id, room.id);
+      const [u, v] = room.spots[hit.idx];
+      const p = P(u + 1.05, v + 1.08, 6);
+      const color = status === 'idle' ? 0x969fb1 : status === 'throttled' ? 0xffb65a : 0x7ee787;
+      g.fillStyle(0x141b29, 0.9);
+      g.fillCircle(p.x, p.y, 5 * zoom);
+      g.fillStyle(color, 1);
+      g.fillCircle(p.x, p.y, 3.1 * zoom);
+    }
+
+    const delivery = game.delivery;
+    if (delivery?.room === room.id) {
+      const elapsed = game.s.playSec - delivery.at;
+      if (elapsed >= 0 && elapsed < 7) {
+        const progress = Math.min(1, elapsed / 0.9);
+        for (let i = 0; i < Math.min(3, delivery.count); i++) {
+          const u = 0.35 + i * 0.39;
+          const v = room.size - 0.55 + (1 - progress) * 0.8;
+          const z = (1 - progress) * 14;
+          box(g, u, v, 0.32, 0.32, 11, 0xb67c45, z);
+          g.lineStyle(2 * zoom, 0xecc693, 1);
+          line(g, P(u + 0.16, v, z + 11), P(u + 0.16, v + 0.32, z + 11));
+        }
+      }
+    }
+
+    const worn = (game.s.cond[room.id] ?? 100) < 72;
+    const target = slots?.findIndex(Boolean) ?? -1;
+    if (!powered || !worn || target < 0 || !(game.s.staff.tech > 0)) return;
+    const [u, v] = room.spots[target];
+    const phase = this.t % 8;
+    const walk = phase < 2.5 ? phase / 2.5 : phase > 5.5 ? (8 - phase) / 2.5 : 1;
+    const origin = P(0.7, room.size - 1);
+    const destination = P(u - 0.2, v + 0.8);
+    const x = origin.x + (destination.x - origin.x) * walk;
+    const y = origin.y + (destination.y - origin.y) * walk;
+    const z = zoom;
+    const stride = walk < 1 ? Math.sin(this.t * 13) * 3 * z : 0;
+    g.fillStyle(0x141b29, 0.45);
+    g.fillEllipse(x, y, 18 * z, 7 * z);
+    g.lineStyle(3 * z, 0x28323c, 1);
+    g.lineBetween(x - 3 * z, y - 8 * z, x - 3 * z + stride, y);
+    g.lineBetween(x + 3 * z, y - 8 * z, x + 3 * z - stride, y);
+    g.fillStyle(0x2d8c82, 1);
+    g.fillRoundedRect(x - 6 * z, y - 22 * z, 12 * z, 15 * z, 3 * z);
+    g.fillStyle(0xffc857, 1);
+    g.fillCircle(x, y - 25 * z, 5 * z);
+    if (walk === 1) {
+      g.lineStyle(2 * z, 0xc8f5e3, 1);
+      g.lineBetween(x + 4 * z, y - 16 * z, x + (9 + Math.sin(this.t * 7)) * z, y - 20 * z);
+    }
   }
 
   private onFx(name: string) {

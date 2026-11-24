@@ -2,7 +2,7 @@ import { game, MISSIONS, ACHIEVEMENTS, INSURE_RATE, LOAN_RATE, POOL_FEE, BOOST_I
 import type { OfflineReport } from './game';
 import { ROOMS, UPGRADES, STAFF, TECHS, COINS, LOANS, DEFAULT_COIN, upgradeCost, staffCost, coinDef, techDef } from './config';
 import type { Kind } from './config';
-import { BUILD_PRESETS, PARTS, PREBUILT, CATS, CAT_ORDER, partDef, prebuiltDef, partLabel, partIcon, machineIcon, buildStats } from './hardware';
+import { BUILD_PRESETS, PARTS, PREBUILT, CATS, CAT_ORDER, partDef, prebuiltDef, partLabel, partIcon, machineIcon, machineStats, buildStats, cloneBuild, buildPartList } from './hardware';
 import type { PartCat, PartDef, HwMarket, MachineStat } from './hardware';
 import { holderValue, shortAddr } from './world';
 import { sfx } from './audio';
@@ -12,6 +12,7 @@ import type { OpsTab } from './operations-ui';
 import { CONSUMABLES } from './operations-data';
 import { keys } from './operations-state';
 import { SAVE_SLOTS, slotPreview } from './save-slots';
+import { GRID_SHORTAGE, GRID_WARNING, WorkshopJobs } from './activities';
 
 type Tab = 'shop' | 'build' | 'inv' | 'market' | 'chain' | 'bank' | 'tech' | 'tasks' | 'ach' | 'rooms' | 'ops' | 'more';
 const TABS: [Tab, string, string][] = [
@@ -207,8 +208,7 @@ export class HUD {
     game.on('change', () => this.renderAll());
     game.on('toast', (m) => this.toast(m ?? ''));
     this.renderAll();
-    if (game.requiresNewSave) this.newReleaseModal();
-    else if (game.saveWarning) this.settingsModal();
+    if (game.saveWarning) this.settingsModal();
     else if (!game.s.tutorial) this.tutorial(0);
     requestAnimationFrame(() => this.loop());
   }
@@ -247,34 +247,6 @@ export class HUD {
   }
 
   // ---- Modals ----
-
-  private newReleaseModal() {
-    const background = [ ...$('hud').children, $('game') ]
-      .filter((element): element is HTMLElement => element instanceof HTMLElement && element.id !== 'modal');
-    for (const element of background) element.inert = true;
-    this.modal(`<h2 id="release-title">Neue Spielversion</h2>
-      <p>Erstelle einen neuen Spielstand, um weiterzuspielen. Bisherige Spielstände bleiben im Browser archiviert.</p>
-      <p id="release-error" role="alert" hidden></p>
-      <div class="btns"><button type="button" class="primary" id="start-new-release">Neuen Spielstand erstellen</button></div>`, (modal) => {
-      modal.onclick = null;
-      const dialog = modal.querySelector('.dlg')!;
-      dialog.setAttribute('role', 'dialog');
-      dialog.setAttribute('aria-modal', 'true');
-      dialog.setAttribute('aria-labelledby', 'release-title');
-      const start = modal.querySelector<HTMLButtonElement>('#start-new-release')!;
-      start.focus();
-      start.addEventListener('click', () => {
-        if (!game.startNewRelease()) {
-          const error = modal.querySelector<HTMLElement>('#release-error')!;
-          error.hidden = false;
-          error.textContent = 'Der Spielstand konnte nicht angelegt werden. Prüfe den Browserspeicher oder lade die Seite neu.';
-          return;
-        }
-        for (const element of background) element.inert = false;
-        this.tutorial(0);
-      });
-    });
-  }
 
   private modal(html: string, bind?: (root: HTMLElement) => void) {
     const m = $('modal');
@@ -346,7 +318,7 @@ export class HUD {
         });
       }
       q('#doimp').addEventListener('click', () => {
-        if (!game.importSave((q('#imp') as HTMLTextAreaElement).value)) this.toast('Spielstand ungültig oder aus einer anderen Version.');
+        if (!game.importSave((q('#imp') as HTMLTextAreaElement).value)) this.toast('Spielstand konnte nicht geladen werden.');
       });
       q('#tut').addEventListener('click', () => this.tutorial(0));
       q('#nick').addEventListener('change', (e) => { game.setNick((e.target as HTMLInputElement).value); this.toast('Nickname gespeichert.'); });
@@ -443,6 +415,10 @@ export class HUD {
     switch (act) {
       case 'shop-seg': this.shopSeg = d.seg as 'parts' | 'pre'; this.renderContent(); break;
       case 'shop-cat': this.shopCat = d.cat as PartCat; this.renderContent(); break;
+      case 'forecast-pre': this.previewPurchase('pre', id); break;
+      case 'forecast-part': this.previewPurchase('part', id); break;
+      case 'forecast-build': this.previewPurchase('build'); break;
+      case 'workshop-deliver': game.deliverWorkshopOrder(id); break;
       case 'buy-part': game.buyPart(id); break;
       case 'sell-part': game.sellPart(id); break;
       case 'buy-pre': game.buyPrebuilt(id); break;
@@ -631,6 +607,72 @@ export class HUD {
     }
   }
 
+  private previewPurchase(target: 'pre' | 'part' | 'build', id = '') {
+    let stats: MachineStat;
+    let cost: number;
+    let insuredValue: number;
+    let partPrice: number | null = null;
+    if (target === 'pre') {
+      const device = prebuiltDef(id);
+      if (!device) return;
+      stats = machineStats({ id: '', name: device.name, pre: id });
+      cost = insuredValue = game.prePrice(id);
+    } else {
+      const draft = cloneBuild(game.s.draft);
+      if (target === 'part') {
+        const part = partDef(id);
+        if (!part) return;
+        partPrice = game.partPrice(id);
+        if (part.cat === 'gpu') draft.gpus.push(id);
+        else draft.parts[part.cat] = id;
+      }
+      const build = buildStats(draft);
+      if (build.problems.length) {
+        this.modal(`<h2>Kaufvorschau</h2><p>Vervollständige zuerst die Konfiguration in der Werkstatt.</p>
+          ${build.problems.map((problem) => `<p>${escapeHtml(problem)}</p>`).join('')}
+          <div class="btns"><button class="primary" id="close-forecast">Schließen</button></div>`,
+        (modal) => modal.querySelector('#close-forecast')?.addEventListener('click', () => this.closeModal()));
+        return;
+      }
+      stats = build;
+      cost = game.missingCost(draft).cost;
+      insuredValue = buildPartList(draft).reduce((sum, part) => sum + game.partPrice(part), 0);
+    }
+    const rows = game.purchaseForecast(stats, insuredValue, target !== 'pre').map((forecast) => {
+      const { room, free } = forecast;
+      const active = room.id === game.s.active ? ' · aktuell ausgewählt' : '';
+      const details = 'net' in forecast && forecast.net !== undefined
+        ? kv('Zusätzlich netto', `${forecast.net >= 0 ? '+' : ''}${num(forecast.net, 3)} €/s · ${forecast.coin}`)
+          + kv('Netzreserve danach', `${num(forecast.gridReserve, 2)} kW`)
+          + kv('Kühlreserve danach', `${num(forecast.heatReserve, 1)} Hitzeeinheiten`)
+          + kv('Verfügbare Leistung', `${num(forecast.throttle * 100)} %`)
+        : `<p>${!free ? 'Kein freier Stellplatz.' : 'Kein kompatibler Coin freigeschaltet.'}</p>`;
+      return `<div class="card"><b>${room.name}${active}</b>${details}</div>`;
+    }).join('');
+    this.modal(`<h2>Kaufvorschau · ${escapeHtml(stats.name)}</h2>
+      <p>${target === 'pre' ? `${eur(cost)} Kaufpreis` : `${partPrice !== null ? `Einzelteil ${eur(partPrice)} · ` : ''}${eur(cost)} fehlende Teile`}</p>
+      <p>Prognose bei aktuellem Kurs, Tarif und Raumzustand. Negative Reserven zeigen Überlastung.</p>
+      ${rows}<div class="btns"><button class="primary" id="close-forecast">Schließen</button></div>`,
+    (modal) => modal.querySelector('#close-forecast')?.addEventListener('click', () => this.closeModal()));
+  }
+
+  private workshopJobs(): string {
+    return title('Werkstattaufträge') + WorkshopJobs.map(({ id }) => {
+      const offer = game.workshopOffer(id)!;
+      const { job, cost, catalog, done, locked, fits } = offer;
+      const status = done ? 'Heute geliefert' : locked ? 'Benötigt Effizienz-Firmware'
+        : !fits ? 'Aktuelle Konfiguration passt noch nicht' : game.s.cash < cost ? 'Bargeld für fehlende Teile fehlt' : 'Bereit zur Lieferung';
+      return `<div class="card"><div class="name">${job.name} · ${job.description}</div>
+        <div class="muted">Mind. ${job.minHash} H/s · max. ${job.maxWatts} W · Katalogbudget ${eur(job.budget)}</div>
+        ${kv('Teilewert der Konfiguration', eur(catalog))}
+        ${kv('Kosten für fehlende Teile', eur(cost))}
+        ${kv('Auftragszahlung', eur(job.reward))}
+        <div class="muted">${status}</div>
+        <div class="btns"><button data-act="workshop-deliver" data-id="${id}" ${done || locked || !fits || game.s.cash < cost ? 'disabled' : ''}>Bauen &amp; an Kunden liefern</button></div>
+      </div>`;
+    }).join('');
+  }
+
   private shop(): string {
     const sale = game.s.ev?.id === 'sale';
     let h = this.hwIndex() + `<div class="seg"><button data-act="shop-seg" data-seg="parts" class="${this.shopSeg === 'parts' ? 'on' : ''}">🧩 Komponenten</button><button data-act="shop-seg" data-seg="pre" class="${this.shopSeg === 'pre' ? 'on' : ''}">📦 Fertig-Miner</button></div>`;
@@ -651,7 +693,7 @@ export class HUD {
           ${locked ? `<div class="lockmsg">🔒 Erforsche „${techDef(p.unlock!).name}“.</div>` : ''}
           <div class="row"><span class="roi">${best > 0 ? `<span class="good">Amortisation ca. ${num(cost / best / 60, 1)} min</span>` : '<span class="bad">Aktuell unrentabel</span>'}<br><span class="muted">Netto €/s: ${html}</span></span>
             <button class="buy" data-act="buy-pre" data-id="${p.id}" data-ppre="${p.id}" data-cost="${cost}" data-locked="${locked || full ? 1 : 0}" ${locked || full ? 'disabled' : ''}>${eur(cost)}</button></div>
-          <div class="btns"><button data-act="lease-pre" data-id="${p.id}" data-lease="${p.id}" data-cost="${lease.deposit}" data-locked="${locked || full ? 1 : 0}" ${locked || full || game.s.cash < lease.deposit ? 'disabled' : ''}>Leasing · ${eur(lease.deposit)} + 3 × ${eur(lease.payment)}</button></div>
+          <div class="btns"><button data-act="forecast-pre" data-id="${p.id}">Raumprognose</button><button data-act="lease-pre" data-id="${p.id}" data-lease="${p.id}" data-cost="${lease.deposit}" data-locked="${locked || full ? 1 : 0}" ${locked || full || game.s.cash < lease.deposit ? 'disabled' : ''}>Leasing · ${eur(lease.deposit)} + 3 × ${eur(lease.payment)}</button></div>
         </div>`;
       }).join('');
     }
@@ -666,6 +708,7 @@ export class HUD {
         ${locked ? `<div class="lockmsg">🔒 Erforsche „${techDef(p.unlock!).name}“.</div>` : ''}
         <div class="btns" style="margin:0;justify-content:flex-end">
           <button data-act="sell-part" data-id="${p.id}" ${have < 1 ? 'disabled' : ''}>Verk. ${eur(game.partSellValue(p.id))}</button>
+          <button data-act="forecast-part" data-id="${p.id}" ${locked ? 'disabled' : ''}>Prognose im PC</button>
           <button data-act="draft-part" data-id="${p.id}" ${locked ? 'disabled' : ''}>➜ Werkstatt</button>
           <button class="buy" data-act="buy-part" data-id="${p.id}" data-pp="${p.id}" data-cost="${cost}" data-locked="${locked ? 1 : 0}" ${locked ? 'disabled' : ''}>${sale ? `<span class="old">${eur(Math.round(p.cost * game.hw[CATS[p.cat].market]))}</span>` : ''}${eur(cost)}</button>
         </div>
@@ -723,12 +766,14 @@ export class HUD {
       <input id="bpname" class="txt" placeholder="Name (optional)" maxlength="32" value="${escapeHtml(this.bpName)}">
       <div class="btns">
         <button class="primary" data-act="build" ${ok ? '' : 'disabled'} data-cost="${cost}" data-locked="${ok ? 0 : 1}">🔧 Zusammenbauen${missing.length ? ` · ${eur(cost)}` : ' (alles im Lager)'}</button>
+        <button data-act="forecast-build" ${ok ? '' : 'disabled'}>Raumprognose</button>
         <button data-act="bp-save" ${ok ? '' : 'disabled'}>💾 Blueprint</button>
         <button data-act="draft-clear">Leeren</button>
         <button data-act="open-inventory">Lager &amp; Stellplätze</button>
       </div>
       ${missing.length ? `<div class="muted" style="margin-top:4px">Wird gekauft: ${missing.map((id) => shortName(partDef(id))).join(', ')}</div>` : ''}
     </div>`;
+    h += this.workshopJobs();
     h += CAT_ORDER.filter((c) => c !== 'gpu' && c !== 'cool').map(row).join('') + gpuRow() + row('cool');
     h += title(`Blueprints ${game.s.blueprints.length}/12`);
     h += game.s.blueprints.length ? game.s.blueprints.map((bp) => {
@@ -748,9 +793,10 @@ export class HUD {
     const card = (id: string, placed: string | null) => {
       const m = game.s.machines[id];
       const st = game.mstat(id);
+      const status = placed ? { idle: 'Pausiert', throttled: 'Gedrosselt', running: 'In Betrieb' }[game.rigStatus(id, placed)] : '';
       const parts = m.build ? [...Object.values(m.build.parts).map((p) => shortName(partDef(p!))), m.build.gpus.length ? `${m.build.gpus.length}× GPU` : ''].filter(Boolean).join(' · ') : prebuiltDef(m.pre!).brand;
       return `<div class="card" style="--c:${hex(st.ledColor)}"><div class="head">${machineIcon(st)}<div style="flex:1"><div class="name">${escapeHtml(m.name)}</div><div class="muted">${num(st.hash, 1)} H/s · ${num(st.watts)} W · Hitze ${num(st.heat, 1)} · ${KIND_NAME[st.kind]}</div><div class="muted" style="font-size:11px">${parts}</div></div></div>
-        ${placed ? `<div class="muted placement-status">Platz ${game.s.rooms[placed].indexOf(id) + 1} · Coin ${game.ops.rigCoin(id, coinDef(game.s.roomCoin[placed] ?? DEFAULT_COIN)).id}</div>` : ''}
+        ${placed ? `<div class="muted placement-status">Platz ${game.s.rooms[placed].indexOf(id) + 1} · Coin ${game.ops.rigCoin(id, coinDef(game.s.roomCoin[placed] ?? DEFAULT_COIN)).id} · ${status}</div>` : ''}
         <div class="btns"><button class="primary" data-act="place-m" data-id="${id}">${placed ? 'Umziehen / tauschen' : 'Aufstellen'}</button>${placed ? `<button data-act="unplace" data-id="${id}">Ins Lager</button>` : ''}
         ${m.build ? `<button data-act="edit-m" data-id="${id}">Bearbeiten</button><button data-act="bp-from" data-id="${id}">💾</button>${placed ? '' : `<button data-act="dismantle" data-id="${id}">Zerlegen</button>`}` : ''}
         ${game.s.ops.leases[id] ? opsLink('rigs', 'Leasing verwalten') : placed ? '' : `<button data-act="sell-m" data-id="${id}">Verk. ${eur(game.machineSellValue(m))}</button>`}</div></div>`;
@@ -1150,6 +1196,13 @@ export class HUD {
     const event = game.evInfo();
     if (event) active.unshift({ ...event, id: `event-${event.id}`, bad: event.id !== 'sale' });
 
+    const alert = game.gridAlertInfo();
+    if (alert) active.unshift({
+      id: alert.pending ? 'event-grid-warning' : 'event-grid-shortage',
+      name: alert.pending ? 'Stromengpass angekündigt' : 'Stromengpass',
+      icon: '⚡', left: alert.left, total: alert.pending ? GRID_WARNING : GRID_SHORTAGE, bad: true,
+    });
+
     const visible = new Set<string>();
     for (const effect of active) {
       if (effect.left <= 0) continue;
@@ -1160,6 +1213,7 @@ export class HUD {
         card.className = effect.bad ? 'boost glass bad' : 'boost glass';
         card.dataset.effect = effect.id;
         card.innerHTML = `<div class="boost-label"><b>${effect.icon} ${effect.name}</b><time></time></div><div class="track" aria-hidden="true"><div class="fill"></div></div>`;
+        if (effect.id.startsWith('event-grid-')) card.insertAdjacentHTML('beforeend', opsLink('grid'));
         const time = card.querySelector('time')!;
         const fill = card.querySelector<HTMLElement>('.fill')!;
         fill.style.setProperty('--b', effect.bad ? 'var(--hot)' : 'var(--gold)');

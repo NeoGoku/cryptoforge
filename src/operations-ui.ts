@@ -2,6 +2,7 @@ import { COINS, ROOMS, techDef } from './config';
 import type { Game } from './game';
 import { COLLECTIONS, CONSUMABLES, COOLING, CREW, DAY_SECONDS, DESK_UPGRADES, GRID_PROFILES, LAYOUTS, METRIC_NAMES, MODS, PROVIDERS, SITE_SHOP, SKILLS } from './operations-data';
 import type { Objective, Target } from './operations-data';
+import { GRID_BATTERY_COST } from './activities';
 import { keys, owns } from './operations-state';
 
 const art = {
@@ -41,7 +42,19 @@ const clock = (hour: number) => `${String(Math.floor(hour)).padStart(2, '0')}:${
 function gridPanel(g: Game) {
   const o = g.ops, s = o.s.grid, load = g.grid;
   const demand = `${fmt(load.demand, 2)} / ${fmt(load.capacity, 2)} kW`;
-  let html = header('grid', 'Stromnetz', `Spieltag ${o.day} · ${clock(o.hour)}`) + card('Netzauslastung', `
+  let html = header('grid', 'Stromnetz', `Spieltag ${o.day} · ${clock(o.hour)}`);
+  const alert = g.gridAlertInfo();
+  if (alert) {
+    const options = { limit: 'Lastplan (80 % Netzkapazität)', battery: 'Akku (volle Netzkapazität)', tariff: 'Notstromtarif (volle Netzkapazität)' };
+    html += card(alert.pending ? 'Stromengpass angekündigt' : 'Stromengpass aktiv',
+      description(`${alert.pending ? 'Beginnt in' : 'Endet in'} ${Math.ceil(alert.left)} s. Ohne Maßnahme stehen 55 % der Netzkapazität zur Verfügung.`)
+      + (alert.response ? item('Gewählte Maßnahme', options[alert.response]) : buttons(
+        act('Lastplan · kostenlos', 'grid-response', 'limit')
+        + act('Akku · 0,25 kWh', 'grid-response', 'battery', s.charge < GRID_BATTERY_COST || s.batteryMode === 'off')
+        + act(`Notstromtarif · ${eur(g.emergencyTariffCost())}`, 'grid-response', 'tariff', g.s.cash < g.emergencyTariffCost())
+      )));
+  }
+  html += card('Netzauslastung', `
     <div class="cf-ops-meter" role="meter" aria-label="Netzauslastung" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.min(100, Math.round(load.demand / load.capacity * 100))}">
       <span class="${load.demand > load.capacity ? 'over' : ''}" style="width:${Math.min(100, load.demand / load.capacity * 100)}%"></span>
     </div>
@@ -262,6 +275,7 @@ export function performOpsAction(g: Game, operation: string, id: string) {
   const [primary, secondary] = id.split(':', 2);
   switch (operation) {
     case 'repay-arrears': o.repayArrears(); break;
+    case 'grid-response': if (id === 'limit' || id === 'battery' || id === 'tariff') g.respondToGrid(id); break;
     case 'grid': o.upgradeGrid(); break;
     case 'battery': o.upgradeGrid(true); break;
     case 'provider': if (owns(PROVIDERS, id)) o.provider(id); break;

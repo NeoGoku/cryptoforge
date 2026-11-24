@@ -45,10 +45,14 @@ export class Operations {
     return true;
   }
 
-  collectionEffects(): Record<Effect, number> {
+  collectionEffects(projected?: { rigs: number; built: number }): Record<Effect, number> {
     const result: Record<Effect, number> = { click: 1, hash: 1, power: 1, capacity: 1, cost: 1, reward: 1, crew: 1, cool: 1 };
     for (const c of COLLECTIONS) {
-      if (!this.ready(c.targets)) continue;
+      const qualifies = c.targets.every(({ metric, amount }) => {
+        const extra = metric === 'rigs' ? projected?.rigs : metric === 'built' ? projected?.built : 0;
+        return this.metric(metric) + (extra ?? 0) >= amount;
+      });
+      if (!qualifies) continue;
       for (const effect of keys(c.bonuses)) result[effect] *= c.bonuses[effect]!;
     }
     return result;
@@ -64,7 +68,7 @@ export class Operations {
 
   gridLoad(kw: number, effects = this.collectionEffects(), hour = this.hour) {
     const { batteryMode, charge, batteryLevel, guard, policy } = this.s.grid;
-    const capacity = this.gridCapacity(effects);
+    const capacity = this.gridCapacity(effects) * this.game.gridCapacityFactor();
     const backup = batteryMode === 'auto' && charge > EPS ? Math.min(Math.max(0, kw - capacity), 0.65 * batteryLevel) : 0;
     const usable = Math.min(kw, (guard ? 0.88 : 1) * capacity + backup);
     const scheduled = policy === 'night' && this.tariffAt(hour) !== 0.76 ? 0 : policy === 'peak' && this.tariffAt(hour) > 1 ? 0.65 : 1;

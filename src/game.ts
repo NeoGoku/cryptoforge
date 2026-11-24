@@ -7,7 +7,9 @@ import type { Holder } from './world';
 import { Operations } from './operations';
 import { restoreOperations } from './operations-state';
 import { DAY_SECONDS } from './operations-data';
-import { activeSlot, hasPreviousSaves, SAVE_RELEASE, selectSlot, slotKey } from './save-slots';
+import { GRID_BATTERY_COST, GRID_SHORTAGE, GRID_WARNING, WorkshopJobs } from './activities';
+import type { GridResponse } from './activities';
+import { activeSlot, previousSaves, selectSlot, slotKey } from './save-slots';
 import type { SaveSlot } from './save-slots';
 
 export const BASE_TARIFF = 0.32;   // EUR/kWh
@@ -46,7 +48,6 @@ export interface Stats {
 
 export interface SaveData {
   v: 3;
-  release: string;
   ops: ReturnType<typeof restoreOperations>;
   boosts: Record<string, number>; // Bonus-ID → Ende (playSec)
   cash: number;
@@ -84,6 +85,8 @@ export interface SaveData {
   stats: Stats;
   netHistory: number[];
   savedAt: number;
+  workshopDone: Record<string, number>;
+  gridAlert: { starts: number; ends: number; response: GridResponse | null } | null;
   active: string;
 }
 
@@ -263,8 +266,6 @@ const yesterdayStr = (): string => {
 export class Game {
   s: SaveData;
   readonly slot = activeSlot();
-  private releasePending = false;
-  get requiresNewSave() { return this.releasePending; }
   readonly ops = new Operations(this, () => this.afterChange());
   grid!: ReturnType<Operations['gridLoad']>;
   prices: Record<string, number> = {};
@@ -280,6 +281,7 @@ export class Game {
   interestPerSec = 0;
   incomeEurPerSec = 0;
   offlineReport: OfflineReport | null = null;
+  delivery: { room: string; at: number; count: number } | null = null;
   private offlineBatch: OfflineReport | null = null;
   private paused = false;
 
@@ -315,7 +317,6 @@ export class Game {
 
   constructor() {
     const saved = this.load();
-    this.releasePending = this.storedSave === null && hasPreviousSaves();
     this.s = saved ?? this.fresh();
     for (const c of COINS) {
       this.prices[c.id] = c.base;
@@ -647,13 +648,12 @@ export class Game {
     return income - cost;
   }
 
-  /** Hitze, Drosselung, Hashrate, Strom und Coins/s aus dem aktuellen Stand berechnen. */
-  recalc() {
+  private production(extra?: { room: string; device: MachineStat; coin: CoinDef; builds: boolean }) {
     const s = this.s;
     const up = s.upgrades;
     const oc = 1 + 0.1 * (up.oc ?? 0) + (this.has('chain') ? 0.1 : 0);
     const ops = this.ops;
-    const bonuses = ops.collectionEffects();
+    const bonuses = ops.collectionEffects(extra ? { rigs: 1, built: Number(extra.builds) } : undefined);
     const cool = Math.pow(0.85, up.cool ?? 0) * (this.has('immersion') ? 0.8 : 1) * (this.boostOn('cool') ? 0.5 : 1)
       * Math.pow(0.94, ops.level('thermal')) * (ops.effect('freeze') ? 0.5 : 1) * bonuses.cool;
     const psu = Math.pow(0.92, up.psu ?? 0) * (this.has('eff') ? 0.9 : 1) * (this.has('gridops') ? 0.88 : 1) * bonuses.power;
@@ -661,8 +661,8 @@ export class Game {
     const limitF = s.ev?.id === 'heat' ? 0.75 : 1;
     const pm = this.prestigeMult() * (1 + 0.06 * ops.level('legacy')) * (this.has('orbital') ? 1.25 : 1) * (ops.effect('burst') ? 2 : 1) * bonuses.hash;
     const diff = this.difficulty() / (this.has('compression') ? 1.18 : 1);
-    this.roomStats = {};
-    this.rate = {};
+    const roomStats: Record<string, RoomStat> = {};
+    const rate: Record<string, number> = {};
     let hash = 0;
     let watts = 0;
     let rent = 0;
@@ -676,6 +676,9 @@ export class Game {
       const all = slots.filter((id): id is string => id !== null).map((id) => ({
         device: this.mstat(id), tuning: ops.rigEffects(id, coin, bonuses.crew),
       }));
+      if (extra?.room === r.id) {
+        all.push({ device: extra.device, tuning: { main: extra.coin, secondary: undefined, heat: 1, hash: 1, power: 1, wear: 1 } });
+      }
       const items = all.filter(({ device, tuning }) => canMine(device, tuning.main));
       const limit = r.maxHeat * limitF;
       const rawHeat = items.reduce((sum, { device, tuning }) => sum + device.heat * tuning.heat * cool, 0);
@@ -692,7 +695,7 @@ export class Game {
         const hashes = device.hash * tuning.hash * eff * site.hash;
         const add = (target: CoinDef, share: number) => {
           const produced = hashes * share * target.mult[device.kind] * target.perHash / diff;
-          this.rate[target.id] = (this.rate[target.id] ?? 0) + produced;
+          rate[target.id] = (rate[target.id] ?? 0) + produced;
         };
         add(tuning.main, tuning.secondary ? 0.7 : 1);
         if (tuning.secondary) add(tuning.secondary, 0.3);
@@ -700,34 +703,69 @@ export class Game {
         rPower += device.watts * psu * tuning.power * site.power;
         wear += tuning.wear;
       }
-      this.roomStats[r.id] = { idle: all.length - items.length, heat, limit, throttle, power: rPower, hash: rHash, cond, wear: site.wear * (items.length ? wear / items.length : 1) };
+      roomStats[r.id] = { idle: all.length - items.length, heat, limit, throttle, power: rPower, hash: rHash, cond, wear: site.wear * (items.length ? wear / items.length : 1) };
       hash += rHash;
       watts += rPower;
     }
 
-    s.overheated = overheated;
     const output = ops.debtStage().output;
-    this.grid = ops.gridLoad(watts / 1000, bonuses);
-    if (output === 0) {
-      this.grid.grid = this.grid.charging = this.grid.discharge = this.grid.throttle = 0;
+    const grid = ops.gridLoad(watts / 1000, bonuses);
+    if (output === 0 || s.ev?.id === 'outage') {
+      grid.grid = grid.charging = grid.discharge = grid.throttle = 0;
     }
-    if ((s.cash <= 0 || s.ev?.id === 'outage') && this.grid.charging > 0) {
-      this.grid.grid -= this.grid.charging;
-      this.grid.charging = 0;
+    if (s.cash <= 0 && grid.charging > 0) {
+      grid.grid -= grid.charging;
+      grid.charging = 0;
     }
-    this.hashTotal = hash * this.grid.throttle * output;
-    for (const stat of Object.values(this.roomStats)) {
-      stat.hash *= this.grid.throttle * output;
-      stat.power *= this.grid.throttle;
+    const hashTotal = hash * grid.throttle * output;
+    for (const stat of Object.values(roomStats)) {
+      stat.hash *= grid.throttle * output;
+      stat.power *= grid.throttle;
     }
-    for (const id of Object.keys(this.rate)) this.rate[id] *= this.grid.throttle * output;
+    for (const id of Object.keys(rate)) rate[id] *= grid.throttle * output;
     const cost = Math.pow(0.97, ops.level('ledger')) * bonuses.cost;
-    this.powerEurPerSec = (this.grid.grid / 3600) * tariff * POWER_SCALE * cost;
-    this.rentPerSec = rent * cost;
-    this.salaryPerSec = ((s.staff.tech ?? 0) * staffDef('tech').salary + (s.staff.sec ?? 0) * staffDef('sec').salary + ops.crewWages()) * cost;
-    this.premiumPerSec = s.insured ? this.gadgetValue() * INSURE_RATE : 0;
-    this.interestPerSec = s.debt * LOAN_RATE;
-    this.incomeEurPerSec = COINS.reduce((a, c) => a + (this.rate[c.id] ?? 0) * this.prices[c.id], 0) * this.modeFactor();
+    const powerEurPerSec = (grid.grid / 3600) * tariff * POWER_SCALE * cost;
+    const rentPerSec = rent * cost;
+    const salaryPerSec = ((s.staff.tech ?? 0) * staffDef('tech').salary + (s.staff.sec ?? 0) * staffDef('sec').salary + ops.crewWages()) * cost;
+    const premiumPerSec = s.insured ? this.gadgetValue() * INSURE_RATE : 0;
+    const interestPerSec = s.debt * LOAN_RATE;
+    const incomeEurPerSec = COINS.reduce((a, c) => a + (rate[c.id] ?? 0) * this.prices[c.id], 0) * this.modeFactor();
+    return { roomStats, rate, grid, hashTotal, powerEurPerSec, rentPerSec, salaryPerSec, premiumPerSec, interestPerSec, incomeEurPerSec, overheated };
+  }
+
+  recalc() {
+    const { overheated, ...production } = this.production();
+    Object.assign(this, production);
+    this.s.overheated = overheated;
+  }
+
+  rigStatus(id: string, room: string): 'idle' | 'throttled' | 'running' {
+    const coin = coinDef(this.s.roomCoin[room] ?? DEFAULT_COIN);
+    if (!this.running() || this.grid.throttle <= 0 || !this.canMine(id, this.ops.rigCoin(id, coin).id)) return 'idle';
+    const stats = this.roomStats[room];
+    return this.grid.throttle < 0.999 || stats?.throttle < 0.999 || this.ops.debtStage().output < 1
+      ? 'throttled' : 'running';
+  }
+
+  purchaseForecast(device: MachineStat, insuredValue = 0, builds = false) {
+    const baseline = this.production();
+    const powerCost = (power: number) => this.boostOn('power') || this.ops.effect('relief') ? 0 : power;
+    return ROOMS.filter((room) => this.s.rooms[room.id]).map((room) => {
+      const slots = this.s.rooms[room.id];
+      const standard = coinDef(this.s.roomCoin[room.id] ?? DEFAULT_COIN);
+      const candidates = COINS.filter((coin) => this.coinUnlocked(coin) && canMine(device, coin));
+      const coin = candidates.find((coin) => coin.id === standard.id)
+        ?? candidates.sort((a, b) => this.netPerSec(device, b.id) - this.netPerSec(device, a.id))[0];
+      const free = slots.filter((slot) => slot === null).length;
+      if (!coin || !free) return { room, free, compatible: Boolean(coin) };
+      const next = this.production({ room: room.id, device, coin, builds });
+      const { heat, limit, throttle } = next.roomStats[room.id];
+      const gridReserve = next.grid.capacity - next.grid.demand;
+      const insurance = this.s.insured ? insuredValue * INSURE_RATE : 0;
+      const net = next.incomeEurPerSec - baseline.incomeEurPerSec
+        - (powerCost(next.powerEurPerSec) - powerCost(baseline.powerEurPerSec)) - (next.rentPerSec + next.salaryPerSec - baseline.rentPerSec - baseline.salaryPerSec) - insurance;
+      return { room, free, compatible: true, coin: coin.id, net, heatReserve: limit - heat, gridReserve, throttle: throttle * next.grid.throttle };
+    });
   }
 
   /** Laufende Kosten (EUR/s) ohne Zinsen. Bei Stromausfall entfällt der Strom. */
@@ -747,7 +785,7 @@ export class Game {
   // ---- Haupt-Schleife ----
 
   update(dtRaw: number) {
-    if (this.paused || this.releasePending) return;
+    if (this.paused) return;
     const dt = Math.min(Math.max(dtRaw, 0), 0.25);
     const s = this.s;
     s.playSec += dt;
@@ -1053,22 +1091,65 @@ export class Game {
     this.eventTimer -= dt;
     if (this.eventTimer > 0) return;
     this.eventTimer = 70 + Math.random() * 80;
-    if (s.ev || s.playSec < 240 || this.placedCount() === 0) return;
+    if (s.ev || this.gridAlertInfo() || s.playSec < 240 || this.placedCount() === 0) return;
     this.triggerEvent();
+  }
+
+  gridAlertInfo() {
+    const alert = this.s.gridAlert;
+    if (!alert || alert.ends <= this.s.playSec + 1e-6) return null;
+    const pending = alert.starts > this.s.playSec + 1e-6;
+    return { ...alert, pending, left: (pending ? alert.starts : alert.ends) - this.s.playSec };
+  }
+
+  gridCapacityFactor() {
+    const alert = this.gridAlertInfo();
+    if (!alert || alert.pending || alert.response === 'battery' || alert.response === 'tariff') return 1;
+    return alert.response === 'limit' ? 0.8 : 0.55;
+  }
+
+  emergencyTariffCost() {
+    return Math.ceil(90 + this.grid.demand * 35);
+  }
+
+  respondToGrid(response: GridResponse) {
+    const alert = this.gridAlertInfo();
+    if (!alert || alert.response) return;
+    if (response === 'battery') {
+      if (this.s.ops.grid.batteryMode === 'off' || this.s.ops.grid.charge < GRID_BATTERY_COST) {
+        this.toast('Notstrom benötigt 0,25 kWh und einen aktiven Akku.');
+        return;
+      }
+      this.s.ops.grid.charge -= GRID_BATTERY_COST;
+    }
+    if (response === 'tariff') {
+      const cost = this.emergencyTariffCost();
+      if (this.s.cash < cost) { this.toast('Zu wenig Bargeld.'); return; }
+      this.s.cash -= cost;
+    }
+    this.s.gridAlert = { starts: alert.starts, ends: alert.ends, response };
+    this.afterChange();
   }
 
   triggerEvent(forced?: string) {
     const s = this.s;
-    const table: [string, number][] = [['outage', 16], ['crash', 12], ['boom', 12], ['sale', 14], ['heat', 12], ['hack', 12], ['fail', 12]];
+    const table: [string, number][] = [['outage', 10], ['shortage', 14], ['crash', 12], ['boom', 12], ['sale', 14], ['heat', 12], ['hack', 12], ['fail', 12]];
     let id = forced;
     if (!id) {
       let r = Math.random() * table.reduce((a, b) => a + b[1], 0);
       id = table[0][0];
       for (const [k, w] of table) { r -= w; if (r <= 0) { id = k; break; } }
     }
+    if (id === 'shortage' && this.gridAlertInfo()) return;
     s.stats.events++;
     const up = s.upgrades;
     switch (id) {
+      case 'shortage': {
+        const starts = s.playSec + GRID_WARNING;
+        s.gridAlert = { starts, ends: starts + GRID_SHORTAGE, response: null };
+        this.toast('Stromengpass angekündigt. Öffne Betrieb → Stromnetz.');
+        break;
+      }
       case 'outage': {
         const dur = (25 + Math.random() * 20) * Math.pow(0.7, up.bat ?? 0);
         s.ev = { id: 'outage', until: s.playSec + dur, total: dur };
@@ -1221,6 +1302,7 @@ export class Game {
     if (this.s.cash < cost) { this.toast('Zu wenig Bargeld.'); return; }
     this.s.cash -= cost;
     this.addPart(id, 1);
+    this.showDelivery(1);
     this.noteBargain(CATS[p.cat].market);
     this.afterChange();
   }
@@ -1243,6 +1325,7 @@ export class Game {
     this.noteBargain('asic');
     const m = this.newMachine({ name: `${p.brand} ${p.name}`, pre: id });
     if (lease) this.ops.beginLease(m.id, id);
+    this.showDelivery(1);
     this.autoPlace(m.id);
     this.afterChange();
   }
@@ -1335,6 +1418,44 @@ export class Game {
     this.afterChange();
   }
 
+  private showDelivery(count: number) {
+    if (!count) return;
+    const prior = this.delivery;
+    const room = this.s.active;
+    const recent = prior?.room === room && this.s.playSec - prior.at < 5;
+    this.delivery = { room, at: this.s.playSec, count: count + (recent ? prior.count : 0) };
+  }
+
+  workshopOffer(id: string) {
+    const job = WorkshopJobs.find((entry) => entry.id === id);
+    if (!job) return null;
+    const build = this.s.draft;
+    const stats = buildStats(build);
+    const parts = buildPartList(build);
+    const { cost, missing } = this.missingCost(build);
+    const catalog = parts.reduce((sum, part) => sum + partDef(part).cost, 0);
+    const done = this.s.workshopDone[id] === this.ops.day;
+    const locked = 'tech' in job && !this.has(job.tech);
+    const fits = !stats.problems.length && stats.hash >= job.minHash && stats.watts <= job.maxWatts
+      && catalog <= job.budget && parts.every((part) => this.unlocked(partDef(part)));
+    return { job, parts, cost, missing, catalog, done, locked, fits };
+  }
+
+  deliverWorkshopOrder(id: string) {
+    const offer = this.workshopOffer(id);
+    if (!offer || offer.done || offer.locked || !offer.fits) return;
+    if (this.s.cash < offer.cost) { this.toast('Zu wenig Bargeld.'); return; }
+    this.s.cash += offer.job.reward - offer.cost;
+    for (const part of offer.missing) this.addPart(part, 1);
+    for (const part of offer.parts) this.addPart(part, -1);
+    this.s.stats.built++;
+    this.s.workshopDone[id] = this.ops.day;
+    this.showDelivery(offer.missing.length);
+    this.toast(`Auftrag geliefert: ${offer.job.name} · ${offer.job.reward} € Umsatz`);
+    this.fx('repair');
+    this.afterChange();
+  }
+
   private assemble(b: Build, name?: string): boolean {
     const st = buildStats(b);
     if (st.problems.length) { this.toast(`Kein Zusammenbau möglich: ${st.problems[0]}.`); return false; }
@@ -1344,6 +1465,7 @@ export class Game {
     if (this.s.cash < cost) { this.toast(`Zu wenig Bargeld: fehlende Teile kosten ${Math.round(cost).toLocaleString('de-DE')} €.`); return false; }
     this.s.cash -= cost;
     for (const id of missing) this.addPart(id, 1);
+    this.showDelivery(missing.length);
     if (missing.some((id) => partDef(id).cat === 'gpu')) this.noteBargain('gpu');
     for (const id of buildPartList(b)) this.addPart(id, -1);
     const m = this.newMachine({ name: name?.trim() || st.name, build: cloneBuild(b) });
@@ -1724,14 +1846,14 @@ export class Game {
   private fresh(): SaveData {
     const starter: Machine = { id: 'm1', name: 'Alter Familien-PC', build: cloneBuild(STARTER_PC) };
     return {
-      v: 3, release: SAVE_RELEASE, ops: restoreOperations(), boosts: {}, cash: 350, wallet: {}, staked: {}, soldEur: 0, minedTotal: 0, bought: 0, playSec: 0,
+      v: 3, ops: restoreOperations(), boosts: {}, cash: 350, wallet: {}, staked: {}, soldEur: 0, minedTotal: 0, bought: 0, playSec: 0,
       machines: { m1: starter }, parts: {}, blueprints: [], draft: emptyBuild(), mid: 2, addr: makeAddr(), nick: '',
       rooms: { kid: ['m1', null] }, cond: { kid: 100 }, roomCoin: { kid: 'MON' }, upgrades: {}, staff: {},
       research: [], researching: null, debt: 0, insured: false, mode: 'pool', autoSell: { on: false, min: 100 },
       mission: 0, ach: [], overheated: false, ev: null, prestige: { points: 0, resets: 0, lifetime: 0 },
       streak: { last: '', count: 0 }, tutorial: false,
       stats: { events: 0, outages: 0, hacked: 0, blocks: 0, repairs: 0, loans: 0, repaid: 0, powerSpent: 0, rentPaid: 0, interestPaid: 0, clicks: 0, salaryPaid: 0, bonuses: 0, built: 0, bargains: 0, maxCombo: 0, overdrives: 0, deals: 0, tipsWon: 0 },
-      netHistory: [], savedAt: Date.now(), active: 'kid',
+      netHistory: [], savedAt: Date.now(), active: 'kid', workshopDone: {}, gridAlert: null,
     };
   }
 
@@ -1743,6 +1865,10 @@ export class Game {
         if (!saved) this.saveProblem = 'unreadable';
         return saved;
       }
+      for (const raw of previousSaves(this.slot)) {
+        const saved = this.readSave(raw);
+        if (saved) return saved;
+      }
     } catch {
       this.saveProblem = 'storage';
     }
@@ -1752,7 +1878,7 @@ export class Game {
   private readSave(raw: string): SaveData | null {
     try {
       const data = JSON.parse(raw);
-      return data?.release === SAVE_RELEASE ? this.migrate(data) : null;
+      return this.migrate(data);
     } catch {
       return null;
     }
@@ -1797,6 +1923,15 @@ export class Game {
     delete src.release;
     const m = { ...base, ...(src as unknown as SaveData) };
     m.stats = { ...base.stats, ...m.stats };
+    m.workshopDone = Object.fromEntries(WorkshopJobs.flatMap(({ id }) => {
+      const day = m.workshopDone?.[id];
+      return Number.isSafeInteger(day) && day > 0 ? [[id, day]] : [];
+    }));
+    const alert = m.gridAlert;
+    if (!alert || !Number.isFinite(alert.starts) || !Number.isFinite(alert.ends)
+      || alert.ends !== alert.starts + GRID_SHORTAGE || alert.ends <= m.playSec
+      || alert.starts > m.playSec + GRID_WARNING
+      || ![null, 'limit', 'battery', 'tariff'].includes(alert.response)) m.gridAlert = null;
     m.ops = restoreOperations(src.ops, Object.keys(m.machines));
     if (m.cash < 0) {
       m.ops.arrears -= m.cash;
@@ -1852,30 +1987,8 @@ export class Game {
     }
   }
 
-  startNewRelease(): boolean {
-    if (!this.releasePending) return false;
-    try {
-      const key = slotKey(this.slot);
-      if (localStorage.getItem(key) !== null) return false;
-      const fresh = this.fresh();
-      const raw = JSON.stringify(fresh);
-      localStorage.setItem(key, raw);
-      this.storedSave = raw;
-      this.s = fresh;
-      this.releasePending = false;
-      this.saveProblem = null;
-      this.statCache.clear();
-      this.recalc();
-      this.ops.syncPeriods();
-      this.emit('change');
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
   save() {
-    if (this.releasePending || this.noSave || this.paused || this.offlineBatch || this.saveProblem === 'unreadable' || this.saveProblem === 'changed') return;
+    if (this.noSave || this.paused || this.offlineBatch || this.saveProblem === 'unreadable' || this.saveProblem === 'changed') return;
     try {
       const key = slotKey(this.slot);
       if (localStorage.getItem(key) !== this.storedSave) {
@@ -1903,7 +2016,6 @@ export class Game {
   }
 
   importSave(code: string): boolean {
-    if (this.releasePending) return false;
     try {
       const raw = atob(code.trim());
       let data: unknown;
@@ -1913,7 +2025,6 @@ export class Game {
       } catch {
         data = JSON.parse(raw);
       }
-      if (!data || typeof data !== 'object' || !('release' in data) || data.release !== SAVE_RELEASE) return false;
       if (!this.migrate(data as Record<string, unknown>)) return false;
       const key = slotKey(this.slot);
       if (localStorage.getItem(key) !== this.storedSave) return false;
@@ -1927,7 +2038,6 @@ export class Game {
   }
 
   switchSlot(slot: SaveSlot): boolean {
-    if (this.releasePending) return false;
     if (slot === this.slot) return true;
     try {
       this.save();
@@ -1941,7 +2051,6 @@ export class Game {
   }
 
   reset() {
-    if (this.releasePending) return;
     try {
       const key = slotKey(this.slot);
       if (localStorage.getItem(key) !== this.storedSave) {
@@ -1965,7 +2074,7 @@ export class Game {
   resumeOffline(): OfflineReport | null {
     if (!this.paused || this.noSave) return null;
     this.paused = false;
-    return this.releasePending ? null : this.applyOffline();
+    return this.applyOffline();
   }
 
   private applyOffline(): OfflineReport | null {
@@ -2000,8 +2109,12 @@ export class Game {
         const boosts = Object.values(s.boosts).map((end) => end - s.playSec);
         const effects = Object.values(s.ops.effects).map((end) => end - s.ops.clock);
         const timers = [...boosts, ...effects].filter((remaining) => remaining > 1e-6);
+        const alertTime = this.gridAlertInfo()?.left ?? Infinity;
         const untilDay = this.ops.day * DAY_SECONDS - s.ops.clock;
-        const step = Math.min(OFFLINE_STEP, budget - time, untilEvent, untilResearch, untilDay > 1e-6 ? untilDay : OFFLINE_STEP, ...timers);
+        const step = Math.min(
+          OFFLINE_STEP, budget - time, untilEvent, untilResearch, alertTime,
+          untilDay > 1e-6 ? untilDay : OFFLINE_STEP, ...timers,
+        );
         const funded = cost > 0 ? Math.max(0, s.cash) / cost : step;
         const paidTime = Math.min(step, funded);
         const miningTime = this.running() && this.incomeEurPerSec > 0 ? paidTime : 0;
