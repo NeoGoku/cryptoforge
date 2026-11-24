@@ -75,11 +75,11 @@ export const WALLET_TIERS = [
   { name: 'Platin', min: 10000, multiplier: 1.5, lockDays: 4 },
 ];
 
-export type Metric = 'clicks' | 'sold' | 'rigs' | 'built' | 'repair' | 'research' | 'grid' | 'crew' | 'wallet' | 'orders' | 'rooms' | 'mods' | 'shop' | 'hash' | 'yield';
+export type Metric = 'clicks' | 'sold' | 'rigs' | 'built' | 'repair' | 'research' | 'grid' | 'crew' | 'wallet' | 'orders' | 'rooms' | 'mods' | 'shop' | 'hash' | 'yield' | 'rigHash' | 'dailyNet';
 export const METRIC_NAMES: Record<Metric, string> = {
   clicks: 'Mining-Klicks', sold: 'Coin-Verkäufe in €', rigs: 'Miner', built: 'Eigenbauten', repair: 'Reparaturen', research: 'Forschungen',
   grid: 'Netzstufe', crew: 'Zugewiesene Crew', wallet: 'Wallet-Basiswert in €', orders: 'Ausgeführte Limit-Orders', rooms: 'Räume',
-  mods: 'Installierte Mods', shop: 'Standort-Upgrades', hash: 'H/s', yield: 'Tage mit Zinsertrag',
+  mods: 'Installierte Mods', shop: 'Standort-Upgrades', hash: 'H/s gesamt', yield: 'Tage mit Zinsertrag', rigHash: 'H/s im stärksten Rig', dailyNet: 'Prognostizierter Tagesgewinn',
 };
 
 export interface Target { metric: Metric; amount: number }
@@ -108,6 +108,9 @@ export const PROJECTS: Objective[] = [
   { id: 'rig-fleet', name: 'Projekt Rig-Flotte', gate: { metric: 'rigs', amount: 2 }, targets: [{ metric: 'rigs', amount: 4 }, { metric: 'mods', amount: 3 }], cash: 4500, chips: 2 },
   { id: 'treasury-desk', name: 'Projekt Treasury', targets: [{ metric: 'wallet', amount: 500 }, { metric: 'yield', amount: 3 }], cash: 3000, chips: 1 },
   { id: 'crew-campus', name: 'Projekt Crew-Campus', gate: { metric: 'rooms', amount: 2 }, targets: [{ metric: 'crew', amount: 4 }, { metric: 'research', amount: 3 }, { metric: 'shop', amount: 3 }], cash: 7500, chips: 3 },
+  { id: 'heavy-rig', name: 'Datacenter-Rig', targets: [{ metric: 'rigHash', amount: 500 }], cash: 6500, chips: 2 },
+  { id: 'daily-profit', name: 'Profitabler Standort', targets: [{ metric: 'dailyNet', amount: 1000 }], cash: 12000, chips: 3 },
+  { id: 'farm-network', name: 'Farm-Netzwerk', targets: [{ metric: 'rooms', amount: 7 }, { metric: 'rigs', amount: 20 }], cash: 85000, chips: 8 },
 ];
 
 export type Effect = 'click' | 'hash' | 'power' | 'capacity' | 'cost' | 'reward' | 'crew' | 'cool';

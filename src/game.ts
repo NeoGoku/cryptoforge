@@ -674,12 +674,12 @@ export class Game {
       rent += r.rent;
       const coin = coinDef(s.roomCoin[r.id] ?? DEFAULT_COIN);
       const all = slots.filter((id): id is string => id !== null).map((id) => ({
-        device: this.mstat(id), tuning: ops.rigEffects(id, coin, bonuses.crew),
+        id, device: this.mstat(id), tuning: ops.rigEffects(id, coin, bonuses.crew),
       }));
       if (extra?.room === r.id) {
-        all.push({ device: extra.device, tuning: { main: extra.coin, secondary: undefined, heat: 1, hash: 1, power: 1, wear: 1 } });
+        all.push({ id: '', device: extra.device, tuning: { main: extra.coin, secondary: undefined, heat: 1, hash: 1, power: 1, wear: 1 } });
       }
-      const items = all.filter(({ device, tuning }) => canMine(device, tuning.main));
+      const items = all.filter(({ id, device, tuning }) => !s.ops.rigs[id]?.rental && canMine(device, tuning.main));
       const limit = r.maxHeat * limitF;
       const rawHeat = items.reduce((sum, { device, tuning }) => sum + device.heat * tuning.heat * cool, 0);
       const site = ops.siteEffects(r.id, rawHeat, limit);
@@ -1314,12 +1314,12 @@ export class Game {
     this.afterChange();
   }
 
-  buyPrebuilt(id: string, lease = false) {
+  buyPrebuilt(id: string, lease = false, priceFactor = 1) {
     const p = prebuiltDef(id);
     if (!p) return;
     if (!this.unlocked(p)) { this.toast('Noch nicht erforscht.'); return; }
     if (!this.hasSpace()) return;
-    const cost = lease ? this.ops.leaseQuote(id).deposit : this.prePrice(id);
+    const cost = lease ? this.ops.leaseQuote(id).deposit : Math.round(this.prePrice(id) * Math.max(0.5, Math.min(1, priceFactor)));
     if (this.s.cash < cost) { this.toast('Zu wenig Bargeld.'); return; }
     this.s.cash -= cost;
     this.noteBargain('asic');
@@ -1611,8 +1611,13 @@ export class Game {
     const c = coinDef(coinId);
     if (!this.s.rooms[roomId] || !this.coinUnlocked(c)) return;
     this.s.roomCoin[roomId] = coinId;
-    const weak = (this.s.rooms[roomId] ?? []).filter((id): id is string => !!id && !this.s.ops.rigs[id]?.target).filter((id) => !canMine(this.mstat(id), c)).length;
-    if (weak) this.toast(`Achtung: ${weak} Gerät(e) schaffen ${c.id} nicht (min. ${c.minHash} H/s) und stehen still.`);
+    const weak = (this.s.rooms[roomId] ?? []).filter((id): id is string => !!id && !this.s.ops.rigs[id]?.target).filter((id) => !canMine(this.mstat(id), c));
+    if (weak.length) {
+      const names = weak.map((id) => this.s.machines[id]?.name ?? 'Miner');
+      const shown = names.slice(0, 2).join(', ');
+      const rest = names.length > 2 ? ` und ${names.length - 2} weitere` : '';
+      this.toast(`Warnung: ${shown}${rest} minen ${c.id} nicht und bleiben untätig. Mindestleistung: ${c.minHash} H/s je Miner.`);
+    }
     this.afterChange();
   }
 

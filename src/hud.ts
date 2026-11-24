@@ -1,6 +1,3 @@
-Warning: truncated output (original token count: 22523)
-Total output lines: 1402
-
 import { game, MISSIONS, ACHIEVEMENTS, INSURE_RATE, LOAN_RATE, POOL_FEE, BOOST_INFO, OD_MAX, OFFLINE_CAP } from './game';
 import type { OfflineReport } from './game';
 import { ROOMS, UPGRADES, STAFF, TECHS, COINS, LOANS, DEFAULT_COIN, upgradeCost, staffCost, coinDef, techDef } from './config';
@@ -100,7 +97,7 @@ const QUIET = new Set(['deal-skip', 'shop-seg', 'shop-cat', 'draft-set', 'draft-
 export class HUD {
   private tab: Tab = /^#betrieb(?:\/|$)/.test(location.hash) ? 'ops' : 'shop';
   private opsTab: OpsTab = 'grid';
-  private shopSeg: 'parts' | 'pre' = 'parts';
+  private shopSeg: 'parts' | 'pre' | 'used' = 'parts';
   private shopCat: PartCat = 'gpu';
   private bpName = '';
   private cash = new Counter($('cash'), eur, true);
@@ -416,7 +413,7 @@ export class HUD {
     const act = d.act ?? '';
     const before = game.s.cash;
     switch (act) {
-      case 'shop-seg': this.shopSeg = d.seg as 'parts' | 'pre'; this.renderContent(); break;
+      case 'shop-seg': this.shopSeg = d.seg as 'parts' | 'pre' | 'used'; this.renderContent(); break;
       case 'shop-cat': this.shopCat = d.cat as PartCat; this.renderContent(); break;
       case 'forecast-pre': this.previewPurchase('pre', id); break;
       case 'forecast-part': this.previewPurchase('part', id); break;
@@ -431,6 +428,7 @@ export class HUD {
       case 'buy-part': game.buyPart(id); break;
       case 'sell-part': game.sellPart(id); break;
       case 'buy-pre': game.buyPrebuilt(id); break;
+      case 'buy-pre-used': game.buyPrebuilt(id, false, Number(d.discount) || 0.75); break;
       case 'lease-pre': game.buyPrebuilt(id, true); break;
       case 'open-ops':
         if (isOpsTab(id)) {
@@ -688,7 +686,7 @@ export class HUD {
 
   private shop(): string {
     const sale = game.s.ev?.id === 'sale';
-    let h = this.hwIndex() + `<div class="seg"><button data-act="shop-seg" data-seg="parts" class="${this.shopSeg === 'parts' ? 'on' : ''}">🧩 Komponenten</button><button data-act="shop-seg" data-seg="pre" class="${this.shopSeg === 'pre' ? 'on' : ''}">📦 Fertig-Miner</button></div>`;
+    let h = this.hwIndex() + `<div class="seg"><button data-act="shop-seg" data-seg="parts" class="${this.shopSeg === 'parts' ? 'on' : ''}">🧩 Teile</button><button data-act="shop-seg" data-seg="pre" class="${this.shopSeg === 'pre' ? 'on' : ''}">📦 Neu</button><button data-act="shop-seg" data-seg="used" class="${this.shopSeg === 'used' ? 'on' : ''}">♻️ Gebraucht</button></div>`;
     if (sale) h += '<div class="lockmsg" style="color:var(--gold);margin-bottom:8px">🏷️ Hardware-Sale: alles −30 %!</div>';
     if (this.shopSeg === 'pre') {
       const full = game.totalGadgets() >= game.machineLimit();
@@ -697,7 +695,134 @@ export class HUD {
         const locked = !game.unlocked(p);
         const cost = game.prePrice(p.id);
         const lease = game.ops.leaseQuote(p.id);
-        const st: MachineStat = { name: p.name, kind: p.kind, model: p.model, hash: p.hash, watts: p.watts, heat: p.heat, color: p.col…2523 tokens truncated…Name(partDef(p!))), m.build.gpus.length ? `${m.build.gpus.length}× GPU` : ''].filter(Boolean).join(' · ') : prebuiltDef(m.pre!).brand;
+        const st: MachineStat = { name: p.name, kind: p.kind, model: p.model, hash: p.hash, watts: p.watts, heat: p.heat, color: p.color, ledColor: p.ledColor, gpus: [], maxGpu: 0 };
+        const { html, best } = this.coinLines(st);
+        return `<div class="card ${locked ? 'lock' : ''}" style="--c:${hex(p.ledColor)}">
+          <div class="head">${machineIcon(st)}<div style="flex:1"><div class="row"><span class="name">${p.name}</span><span class="tag">${KIND_NAME[p.kind]}</span></div><div class="muted">${p.brand} · Besitz: ${game.owned(p.id)}</div></div></div>
+          <div class="muted" style="margin:6px 0">${p.desc}</div>
+          ${kv('Leistung', `${num(p.hash)} H/s · ${num(p.watts)} W · Hitze ${num(p.heat)}`)}
+          ${locked ? `<div class="lockmsg">🔒 Erforsche „${techDef(p.unlock!).name}“.</div>` : ''}
+          <div class="row"><span class="roi">${best > 0 ? `<span class="good">Amortisation ca. ${num(cost / best / 60, 1)} min</span>` : '<span class="bad">Aktuell unrentabel</span>'}<br><span class="muted">Netto €/s: ${html}</span></span>
+            <button class="buy" data-act="buy-pre" data-id="${p.id}" data-ppre="${p.id}" data-cost="${cost}" data-locked="${locked || full ? 1 : 0}" ${locked || full ? 'disabled' : ''}>${eur(cost)}</button></div>
+          <div class="btns"><button data-act="forecast-pre" data-id="${p.id}">Raumprognose</button><button data-act="lease-pre" data-id="${p.id}" data-lease="${p.id}" data-cost="${lease.deposit}" data-locked="${locked || full ? 1 : 0}" ${locked || full || game.s.cash < lease.deposit ? 'disabled' : ''}>Leasing · ${eur(lease.deposit)} + 3 × ${eur(lease.payment)}</button></div>
+        </div>`;
+      }).join('');
+    }
+    if (this.shopSeg === 'used') {
+      const stock = PREBUILT.filter((p) => game.unlocked(p));
+      if (!stock.length) return h + '<div class="card">Heute keine geprüften Gebrauchtgeräte im Angebot.</div>';
+      const start = ((game.ops.day - 1) * 2) % stock.length;
+      const offers = [0, 1, 2].map((i) => stock[(start + i * 3) % stock.length])
+        .filter((p, i, all) => all.findIndex((x) => x.id === p.id) === i);
+      const factors = [0.76, 0.69, 0.82];
+      h += `<div class="card" style="--c:var(--gold)"><div class="name">Tagesangebote · geprüft &amp; gebraucht</div><div class="muted">Der Bestand wechselt mit jedem Spieltag. Gebrauchte Miner laufen wie Neuware, kosten aber weniger.</div></div>`;
+      return h + offers.map((p, i) => {
+        const cost = Math.round(game.prePrice(p.id) * factors[i]);
+        const st: MachineStat = { name: p.name, kind: p.kind, model: p.model, hash: p.hash, watts: p.watts, heat: p.heat, color: p.color, ledColor: p.ledColor, gpus: [], maxGpu: 0 };
+        const { html, best } = this.coinLines(st);
+        return `<div class="card" style="--c:${hex(p.ledColor)}"><div class="head">${machineIcon(st)}<div style="flex:1"><div class="row"><span class="name">${p.name}</span><span class="tag" style="--c:var(--gold)">Gebraucht · −${num((1 - factors[i]) * 100)} %</span></div><div class="muted">${p.brand} · ${KIND_NAME[p.kind]}</div></div></div><div class="muted" style="margin:6px 0">${p.desc}</div>${kv('Leistung', `${num(p.hash)} H/s · ${num(p.watts)} W`)}<div class="row"><span class="muted">Netto €/s: ${html}${best > 0 ? `<br>Amortisation ca. ${num(cost / best / 60, 1)} min` : ''}</span><button class="buy" data-act="buy-pre-used" data-id="${p.id}" data-discount="${factors[i]}" ${game.totalGadgets() >= game.machineLimit() || game.s.cash < cost ? 'disabled' : ''}>${eur(cost)}</button></div></div>`;
+      }).join('');
+    }
+    h += `<div class="chips" style="margin:0 0 10px">${CAT_ORDER.map((c) => `<button data-act="shop-cat" data-cat="${c}" class="${this.shopCat === c ? 'on' : ''}">${CATS[c].icon} ${CATS[c].name}</button>`).join('')}</div>`;
+    return h + PARTS.filter((p) => p.cat === this.shopCat)
+      .map((p) => ({ part: p, price: game.partPrice(p.id) }))
+      .sort((a, b) => a.price - b.price || a.part.name.localeCompare(b.part.name, 'de'))
+      .map(({ part: p, price: cost }) => {
+      const locked = !game.unlocked(p);
+      const have = game.s.parts[p.id] ?? 0;
+      return `<div class="card ${locked ? 'lock' : ''}" style="--c:${hex(p.color)}">
+        <div class="head">${partIcon(p)}<div style="flex:1"><div class="row"><span class="name">${p.name}</span>${have ? `<span class="tag" style="--c:var(--acc)">Lager ${have}</span>` : ''}</div><div class="muted">${p.brand} · ${this.partStats(p)}</div></div></div>
+        <div class="muted" style="margin:6px 0">${p.desc}</div>
+        ${locked ? `<div class="lockmsg">🔒 Erforsche „${techDef(p.unlock!).name}“.</div>` : ''}
+        <div class="btns" style="margin:0;justify-content:flex-end">
+          <button data-act="sell-part" data-id="${p.id}" ${have < 1 ? 'disabled' : ''}>Verk. ${eur(game.partSellValue(p.id))}</button>
+          <button data-act="forecast-part" data-id="${p.id}" ${locked ? 'disabled' : ''}>Prognose im PC</button>
+          <button data-act="draft-part" data-id="${p.id}" ${locked ? 'disabled' : ''}>➜ Werkstatt</button>
+          <button class="buy" data-act="buy-part" data-id="${p.id}" data-pp="${p.id}" data-cost="${cost}" data-locked="${locked ? 1 : 0}" ${locked ? 'disabled' : ''}>${sale ? `<span class="old">${eur(Math.round(p.cost * game.hw[CATS[p.cat].market]))}</span>` : ''}${eur(cost)}</button>
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  private workshop(): string {
+    const d = game.s.draft;
+    const st = buildStats(d);
+    const { cost, missing } = game.missingCost(d);
+    const row = (cat: PartCat) => {
+      const opts = PARTS.filter((p) => p.cat === cat);
+      const cur = d.parts[cat];
+      const chips = opts.map((p) => {
+        const locked = !game.unlocked(p);
+        const have = game.s.parts[p.id] ?? 0;
+        return `<button data-act="draft-set" data-cat="${cat}" data-id="${p.id}" class="${cur === p.id ? 'on' : ''}" ${locked ? 'disabled' : ''}>${locked ? '🔒 ' : ''}${shortName(p)} <small>${have ? `Lager ${have}` : eur(game.partPrice(p.id))}</small></button>`;
+      }).join('');
+      const none = CATS[cat].req ? '' : `<button data-act="draft-none" data-cat="${cat}" class="${cur ? '' : 'on'}">Keine</button>`;
+      return `<div class="wsrow"><div class="row"><span class="name">${CATS[cat].icon} ${CATS[cat].name}${CATS[cat].req ? '' : ' <small class="muted">optional</small>'}</span><span class="muted">${cur ? partLabel(partDef(cur)) : CATS[cat].req ? '<span class="bad">fehlt</span>' : '–'}</span></div><div class="chips">${none}${chips}</div></div>`;
+    };
+    const gpuRow = () => {
+      const max = st.maxGpu;
+      const full = !max || d.gpus.length >= max;
+      const rows = PARTS.filter((p) => p.cat === 'gpu').map((p) => {
+        const n = d.gpus.filter((x) => x === p.id).length;
+        const have = game.s.parts[p.id] ?? 0;
+        return `<div class="gpurow"><div class="gi"><b>${p.brand} ${p.name}</b><small>${num(p.hash ?? 0)} H/s · ${num(p.watts ?? 0)} W · ${have ? `Lager ${have}` : eur(game.partPrice(p.id))}</small></div>
+          <div class="step ${n ? 'on' : ''}"><button data-act="draft-gpu-sub" data-id="${p.id}" ${n ? '' : 'disabled'}>−</button><b>${n}</b><button data-act="draft-gpu-add" data-id="${p.id}" ${full ? 'disabled' : ''}>+</button></div></div>`;
+      }).join('');
+      const last = d.gpus[d.gpus.length - 1];
+      return `<div class="wsrow"><div class="row"><span class="name">🎮 Grafikkarten</span><span class="muted">${d.gpus.length} / ${max || '–'} Plätze</span></div>
+        ${max ? rows : '<div class="muted" style="margin-top:4px">Wähle zuerst Gehäuse und Mainboard.</div>'}
+        ${max && last && d.gpus.length < max ? `<button style="margin-top:6px;width:100%" data-act="draft-gpu-fill" data-id="${last}">Restliche ${max - d.gpus.length} Plätze mit ${shortName(partDef(last))} füllen</button>` : ''}</div>`;
+    };
+    const { html, best } = this.coinLines(st);
+    const loadRatio = st.cap ? st.dc / st.cap : 0;
+    const ok = st.problems.length === 0;
+    let h = `<div class="muted" style="margin:0 2px 8px">Wähle die Teile. Vorhandene Lagerteile werden zuerst verbaut, fehlende Teile beim Zusammenbau gekauft.</div>`;
+    h += `<div class="chips" aria-label="Bauvorlagen">${BUILD_PRESETS.map((preset) => `
+      <button data-act="draft-preset" data-id="${preset.id}">${preset.name} <small>${eur(game.missingCost(preset.build).cost)}</small></button>
+    `).join('')}</div>`;
+    h += `<div class="card" style="--c:${ok ? 'var(--acc)' : 'var(--hot)'}">
+      <div class="head">${machineIcon(st)}<div style="flex:1"><div class="name">${st.name}</div><div class="muted">${KIND_NAME[st.kind]} · ${st.model === 'rig' ? 'offener Rig' : 'Tower-PC'}</div></div></div>
+      <div class="bars" style="margin-top:6px">
+        ${bar('Hash', st.hash, Math.max(50, st.hash), `${num(st.hash, 1)} H/s`, '#8c7bff')}
+        ${bar('Netzteil', st.dc, st.cap || st.dc || 1, st.cap ? `${num(st.dc)} / ${num(st.cap)} W` : `${num(st.dc)} W`, loadRatio > 1 ? '#ff6a3d' : loadRatio > 0.85 ? '#ffc857' : '#7ee787')}
+        ${bar('Hitze', st.heat, Math.max(100, st.heat), num(st.heat, 1), '#ff6a3d')}
+      </div>
+      ${kv('Strom aus der Steckdose', `${num(st.watts)} W`)}
+      ${st.problems.map((p) => `<div class="lockmsg">⚠️ ${p}</div>`).join('')}
+      <div class="muted" style="margin-top:6px">Netto €/s: ${html}</div>
+      ${ok && best > 0 && cost > 0 ? `<div class="muted">Amortisation der neuen Teile ca. ${num(cost / best / 60, 1)} min</div>` : ''}
+      <input id="bpname" class="txt" placeholder="Name (optional)" maxlength="32" value="${escapeHtml(this.bpName)}">
+      <div class="btns">
+        <button class="primary" data-act="build" ${ok ? '' : 'disabled'} data-cost="${cost}" data-locked="${ok ? 0 : 1}">🔧 Zusammenbauen${missing.length ? ` · ${eur(cost)}` : ' (alles im Lager)'}</button>
+        <button data-act="forecast-build" ${ok ? '' : 'disabled'}>Raumprognose</button>
+        <button data-act="bp-save" ${ok ? '' : 'disabled'}>💾 Blueprint</button>
+        <button data-act="draft-clear">Leeren</button>
+        <button data-act="open-inventory">Lager &amp; Stellplätze</button>
+      </div>
+      ${missing.length ? `<div class="muted" style="margin-top:4px">Wird gekauft: ${missing.map((id) => shortName(partDef(id))).join(', ')}</div>` : ''}
+    </div>`;
+    h += '<div class="btns"><button type="button" data-act="open-workshop-orders">Zu den Kunden-PC-Aufträgen</button></div>';
+    h += CAT_ORDER.filter((c) => c !== 'gpu' && c !== 'cool').map(row).join('') + gpuRow() + row('cool');
+    h += title(`Blueprints ${game.s.blueprints.length}/12`);
+    h += game.s.blueprints.length ? game.s.blueprints.map((bp) => {
+      const bs = buildStats(bp.build);
+      const mc = game.missingCost(bp.build).cost;
+      return `<div class="card" style="--c:${hex(bs.ledColor)}"><div class="head">${machineIcon(bs)}<div style="flex:1"><div class="name">${escapeHtml(bp.name)}</div><div class="muted">${num(bs.hash, 1)} H/s · ${num(bs.watts)} W · Hitze ${num(bs.heat, 1)}</div></div></div>
+        <div class="btns"><button class="buy" data-act="bp-build" data-id="${bp.id}" data-cost="${mc}">Bauen · ${eur(mc)}</button><button data-act="bp-load" data-id="${bp.id}">Laden</button><button data-act="bp-del" data-id="${bp.id}">🗑</button></div></div>`;
+    }).join('') : '<div class="muted" style="padding:6px 2px">Noch keine Blueprints. Speichere eine gültige Konfiguration.</div>';
+    return h;
+  }
+
+  private inventory(): string {
+    const room = ROOMS.find((r) => r.id === game.s.active)!;
+    const slots = game.s.rooms[room.id] ?? [];
+    const free = slots.filter((s) => s === null).length;
+    const loose = game.unplaced();
+    const card = (id: string, placed: string | null) => {
+      const m = game.s.machines[id];
+      const st = game.mstat(id);
+      const status = placed ? { idle: 'Pausiert', throttled: 'Gedrosselt', running: 'In Betrieb' }[game.rigStatus(id, placed)] : '';
+      const parts = m.build ? [...Object.values(m.build.parts).map((p) => shortName(partDef(p!))), m.build.gpus.length ? `${m.build.gpus.length}× GPU` : ''].filter(Boolean).join(' · ') : prebuiltDef(m.pre!).brand;
       return `<div class="card" style="--c:${hex(st.ledColor)}"><div class="head">${machineIcon(st)}<div style="flex:1"><div class="name">${escapeHtml(m.name)}</div><div class="muted">${num(st.hash, 1)} H/s · ${num(st.watts)} W · Hitze ${num(st.heat, 1)} · ${KIND_NAME[st.kind]}</div><div class="muted" style="font-size:11px">${parts}</div></div></div>
         ${placed ? `<div class="muted placement-status">Platz ${game.s.rooms[placed].indexOf(id) + 1} · Coin ${game.ops.rigCoin(id, coinDef(game.s.roomCoin[placed] ?? DEFAULT_COIN)).id} · ${status}</div>` : ''}
         <div class="btns"><button class="primary" data-act="place-m" data-id="${id}">${placed ? 'Umziehen / tauschen' : 'Aufstellen'}</button>${placed ? `<button data-act="unplace" data-id="${id}">Ins Lager</button>` : ''}

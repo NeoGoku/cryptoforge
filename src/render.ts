@@ -474,6 +474,10 @@ export class MainScene extends Phaser.Scene {
     this.charPos = null;
     const W = room.size;
     const hot = (game.roomStats[room.id]?.throttle ?? 1) < 1;
+    const style = game.s.ops.layouts[room.id] ?? 'standard';
+    const floorBase = style === 'airflow' ? 0x66808a : style === 'density' ? 0x424958 : 0xa87a2c;
+    const floorAlt = style === 'airflow' ? 0x7897a0 : style === 'density' ? 0x505969 : 0xb98932;
+    const wallMain = style === 'airflow' ? 0xb8d1d7 : style === 'density' ? 0x929cac : 0xd6d9df;
 
     // Schatten
     for (let i = 4; i >= 1; i--) {
@@ -488,10 +492,10 @@ export class MainScene extends Phaser.Scene {
     g.fillPoints([P(W, 0, 0), P(W, W, 0), P(W, W, -12), P(W, 0, -12)], true);
 
     // Boden mit Dielen
-    g.fillStyle(0xa87a2c, 1);
+    g.fillStyle(floorBase, 1);
     g.fillPoints([P(0, 0), P(W, 0), P(W, W), P(0, W)], true);
     for (let i = 0; i < W; i++) {
-      g.fillStyle(i % 2 ? 0xb98932 : 0x9c7027, 0.55);
+      g.fillStyle(i % 2 ? floorAlt : shade(floorBase, 0.92), 0.65);
       g.fillPoints([P(i, 0), P(i + 1, 0), P(i + 1, W), P(i, W)], true);
     }
     g.lineStyle(1 * DPR, 0x000000, 0.16);
@@ -506,7 +510,7 @@ export class MainScene extends Phaser.Scene {
     // Wände
     g.fillStyle(0xbfc4cd, 1);
     g.fillPoints([P(0, 0), P(0, W), P(0, W, WALL), P(0, 0, WALL)], true);
-    g.fillStyle(0xd6d9df, 1);
+    g.fillStyle(wallMain, 1);
     g.fillPoints([P(0, 0), P(W, 0), P(W, 0, WALL), P(0, 0, WALL)], true);
     g.fillStyle(0x9ea4b2, 1);
     g.fillPoints([P(0, 0), P(0, W), P(0, W, 7), P(0, 0, 7)], true);
@@ -543,6 +547,14 @@ export class MainScene extends Phaser.Scene {
     g.lineStyle(4 * DPR, 0xf4f4f6, 1);
     line(g, P(0, 0), P(W, 0));
     line(g, P(0, 0), P(0, W));
+    if (style !== 'standard') {
+      const accent = style === 'airflow' ? 0x65d9e8 : 0xd07aff;
+      g.lineStyle(4 * DPR, accent, 0.92);
+      line(g, P(0.2, 0, 7), P(W - 0.2, 0, 7));
+      line(g, P(0, 0.2, 7), P(0, W - 0.2, 7));
+      g.fillStyle(accent, 0.12);
+      g.fillPoints([P(0, 0, 8), P(W, 0, 8), P(W, 0, 18), P(0, 0, 18)], true);
+    }
     line(g, P(0, W), P(W, W));
     line(g, P(W, W), P(W, 0));
 
@@ -579,8 +591,9 @@ export class MainScene extends Phaser.Scene {
     if (id && game.s.machines[id]) {
       const st = game.mstat(id);
       const defaultCoin = coinDef(game.s.roomCoin[game.s.active] ?? DEFAULT_COIN);
-      const idle = !game.canMine(id, game.ops.rigCoin(id, defaultCoin).id);
-      const led = idle ? 0x3a3f4f : hot ? 0xff6a3d : st.ledColor;
+      const rented = !!game.s.ops.rigs[id]?.rental;
+      const idle = rented || !game.canMine(id, game.ops.rigCoin(id, defaultCoin).id);
+      const led = rented ? 0xffc857 : idle ? 0x3a3f4f : hot ? 0xff6a3d : st.ledColor;
       const fan = (x: number, y: number, sc: number) => {
         g.fillStyle(0x10131c, 1);
         g.fillEllipse(x, y, 40 * zoom * sc, 20 * zoom * sc);
@@ -602,8 +615,14 @@ export class MainScene extends Phaser.Scene {
           g.fillPoints(win, true);
           st.gpus.forEach((gid, k) => {
             const z = z0 + 12 + k * 10;
-            g.lineStyle(4 * zoom, partDef(gid).color === 0x111318 ? 0x3a3f4f : partDef(gid).color, 1);
+            const gpu = partDef(gid);
+            g.lineStyle(4 * zoom, gpu.color === 0x111318 ? 0x3a3f4f : gpu.color, 1);
             line(g, P(u + 0.44, v + 1.0, z), P(u + 0.76, v + 1.0, z));
+            const count = (gpu.hash ?? 0) >= 400 ? 3 : (gpu.hash ?? 0) >= 100 ? 2 : 1;
+            for (let f = 0; f < count; f++) {
+              const p = P(u + 0.45 + 0.3 * (f + 1) / (count + 1), v + 1.0, z + 1.5);
+              fan(p.x, p.y, 0.22);
+            }
           });
           g.lineStyle(1 * DPR, 0xffffff, 0.25);
           g.strokePoints(win, true);

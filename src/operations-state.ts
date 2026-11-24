@@ -33,6 +33,7 @@ export interface RigSettings {
   mods: Mod[];
   target?: string;
   secondary?: string;
+  rental?: { since: number; until: number; rate: number };
 }
 
 export interface Order {
@@ -155,6 +156,9 @@ export function restoreOperations(input?: unknown, machines: string[] = []): Ope
         mods: [...new Set(list(item.mods).filter((mod): mod is Mod => belongs(mod, keys(MODS))))].slice(0, 2),
         target: belongs(item.target, coinIds) ? item.target : undefined,
         secondary: belongs(item.secondary, coinIds) ? item.secondary : undefined,
+        rental: number(object(item.rental).until) > number(object(item.rental).since)
+          ? { since: number(object(item.rental).since), until: number(object(item.rental).until), rate: number(object(item.rental).rate) }
+          : undefined,
       };
     }
     const lease = object(object(raw.leases)[id]);

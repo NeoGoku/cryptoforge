@@ -131,7 +131,9 @@ export class Operations {
 
   advance(dt: number) {
     const before = this.day;
+    const previousClock = this.s.clock;
     this.s.clock += dt;
+    this.accrueRentals(previousClock, this.s.clock);
     if (this.day !== before) {
       this.settleYield();
       this.settleLeases();
@@ -403,6 +405,40 @@ export class Operations {
     return { deposit: Math.round(price * 0.2), payment: Math.round(price * 0.31) };
   }
 
+  rentOut(id: string) {
+    if (!this.game.s.machines[id] || !this.game.roomOf(id) || this.s.leases[id]) return this.fail('Nur eigene, aufgestellte Miner können vermietet werden.');
+    const rig = this.rig(id);
+    if (rig.rental) return this.fail('Dieser Miner ist bereits vermietet.');
+    const device = this.game.mstat(id);
+    const best = COINS.filter((coin) => this.game.coinUnlocked(coin) && this.game.canMine(device, coin.id))
+      .reduce((value, coin) => Math.max(value, this.game.netPerSec(device, coin.id)), 0);
+    const rate = Math.max(0.02, best * 0.55);
+    rig.rental = { since: this.s.clock, until: this.s.clock + DAY_SECONDS * 3, rate };
+    this.game.toast(`Mietvertrag gestartet · ${cashText(rate)}/s für 3 Spieltage. Der Miner pausiert währenddessen.`);
+    this.changed();
+  }
+
+  stopRental(id: string) {
+    const rig = this.s.rigs[id];
+    if (!rig?.rental) return;
+    delete rig.rental;
+    this.game.toast('Mietvertrag vorzeitig beendet. Der Miner ist wieder verfügbar.');
+    this.changed();
+  }
+
+  private accrueRentals(from: number, to: number) {
+    for (const [id, rig] of Object.entries(this.s.rigs)) {
+      const rental = rig.rental;
+      if (!rental) continue;
+      const seconds = Math.max(0, Math.min(to, rental.until) - Math.max(from, rental.since));
+      this.game.s.cash += seconds * rental.rate;
+      if (to >= rental.until) {
+        delete rig.rental;
+        this.game.toast(`${this.game.s.machines[id]?.name ?? 'Miner'}: Mietvertrag beendet.`);
+      }
+    }
+  }
+
   beginLease(id: string, prebuilt: string) {
     const { payment } = this.leaseQuote(prebuilt);
     this.s.leases[id] = { remaining: 3, due: this.day + 1, payment };
@@ -580,6 +616,8 @@ export class Operations {
       case 'shop': return Object.values(this.s.sites).reduce((sum, list) => sum + list.length, 0);
       case 'hash': return g.hashTotal;
       case 'yield': return this.s.yieldDays;
+      case 'rigHash': return Math.max(0, ...Object.keys(g.s.machines).map((id) => g.mstat(id).hash));
+      case 'dailyNet': return Math.max(0, g.netEurPerSec() * DAY_SECONDS);
     }
   }
 

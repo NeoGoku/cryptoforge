@@ -118,7 +118,7 @@ function rigPanel(g: Game) {
   }).join('');
   html += section('Miner');
   for (const [id, machine] of Object.entries(g.s.machines)) {
-    const rig = o.s.rigs[id], lease = o.s.leases[id], location = g.roomOf(id);
+    const rig = o.s.rigs[id], lease = o.s.leases[id], rental = rig?.rental, location = g.roomOf(id);
     const role = rig?.crew;
     const options = (value?: string) => `<option value="">Raumstandard / aus</option>` + COINS.filter((c) => g.coinUnlocked(c) && g.canMine(id, c.id)).map((c) => `<option value="${c.id}"${c.id === value ? ' selected' : ''}>${c.id}</option>`).join('');
     const cmd = (action: string, data: string) => act(data, action, id);
@@ -127,12 +127,14 @@ function rigPanel(g: Game) {
       + item('Crew-Rolle', role ? `${CREW[role].name} · Stufe ${1 + Math.floor((rig?.xp ?? 0) / 300)}` : 'Frei')
       + buttons(keys(CREW).map((r) => act(CREW[r].name, 'assign', `${id}:${r}`, role !== r && o.crewAvailable(r) <= 0, r === role)).join('') + act('Lösen', 'assign', `${id}:-`, !role))
       + item('Mods', `${rig?.mods.length ?? 0} / 2`)
+      + (rental ? item('Vermietung', `${eur(rental.rate, 3)}/s · noch ${fmt(Math.max(0, rental.until - o.s.clock) / DAY_SECONDS, 1)} Spieltage`) : '')
       + (opts.length ? buttons(opts.map((m) => {
         const installed = rig?.mods.includes(m);
         return act(installed ? `${MODS[m].name} entfernen` : `${MODS[m].name} · ${eur(Math.round(MODS[m].cost * 0.3))}`, 'install', `${id}:${m}`, !installed && ((rig?.mods.length ?? 0) >= 2 || g.s.cash < Math.round(MODS[m].cost * 0.3)), installed);
       }).join('')) : description('Entwickle zuerst einen Mod.'))
       + `<label class="cf-ops-field">Coin pro Rig<select data-op-select="target" data-rig="${escapeHtml(id)}" aria-label="Coin pro Rig">${options(rig?.target)}</select></label>`
       + (rig?.mods.includes('dual') ? `<label class="cf-ops-field">Zweitcoin<select data-op-select="secondary" data-rig="${escapeHtml(id)}" aria-label="Zweitcoin">${options(rig.secondary)}</select></label>` : '')
+      + (rental ? buttons(act('Mietvertrag beenden', 'rent-stop', id)) : location && !lease ? buttons(act(`Miner vermieten · 3 Tage`, 'rent-out', id)) : '')
       + (lease ? item('Leasing', `${lease.remaining} × ${eur(lease.payment)} · fällig ab Tag ${lease.due}`) + buttons(act(`Ablösen · ${eur(lease.remaining * lease.payment)}`, 'buyout', id, g.s.cash < lease.remaining * lease.payment) + cmd('return', 'Zurückgeben')) : ''));
   }
   return html;
@@ -301,6 +303,8 @@ export function performOpsAction(g: Game, operation: string, id: string) {
     case 'install': if (owns(MODS, secondary)) o.installMod(primary, secondary); break;
     case 'buyout': o.finishLease(id, false); break;
     case 'return': o.finishLease(id, true); break;
+    case 'rent-out': o.rentOut(id); break;
+    case 'rent-stop': o.stopRental(id); break;
     case 'yield': o.toggleYield(); break;
     case 'deposit-all': o.transfer(id, g.s.wallet[id] ?? 0, false); break;
     case 'withdraw-all': o.transfer(id, o.s.treasury[id]?.amount ?? 0, true); break;
