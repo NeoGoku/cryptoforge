@@ -7,7 +7,7 @@ import type { Holder } from './world';
 import { Operations } from './operations';
 import { restoreOperations } from './operations-state';
 import { DAY_SECONDS } from './operations-data';
-import { activeSlot, hasPreviousSaves, SAVE_RELEASE, selectSlot, slotKey } from './save-slots';
+import { activeSlot, previousSaves, selectSlot, slotKey } from './save-slots';
 import type { SaveSlot } from './save-slots';
 
 export const BASE_TARIFF = 0.32;   // EUR/kWh
@@ -46,7 +46,6 @@ export interface Stats {
 
 export interface SaveData {
   v: 3;
-  release: string;
   ops: ReturnType<typeof restoreOperations>;
   boosts: Record<string, number>; // Bonus-ID → Ende (playSec)
   cash: number;
@@ -263,7 +262,6 @@ const yesterdayStr = (): string => {
 export class Game {
   s: SaveData;
   readonly slot = activeSlot();
-  readonly newRelease: boolean;
   readonly ops = new Operations(this, () => this.afterChange());
   grid!: ReturnType<Operations['gridLoad']>;
   prices: Record<string, number> = {};
@@ -309,23 +307,35 @@ export class Game {
   private soloTimer = SOLO_MEAN;
   private listeners: Record<EventName, Array<(msg?: string) => void>> = { change: [], toast: [], fx: [] };
 
+  private storedSave: string | null = null;
+  private saveProblem: 'unreadable' | 'storage' | 'changed' | null = null;
+
   constructor() {
     const saved = this.load();
-    this.newRelease = !saved && hasPreviousSaves();
     this.s = saved ?? this.fresh();
     for (const c of COINS) {
       this.prices[c.id] = c.base;
       this.history[c.id] = [c.base];
     }
-    this.recalc();
-    this.ops.syncPeriods();
-    if (this.remapMission) {
-      let i = 0;
-      while (i < MISSIONS.length && MISSIONS[i].done(this)) i++;
-      this.s.mission = i;
-      this.remapMission = false;
+    try {
+      this.recalc();
+      this.ops.syncPeriods();
+      if (this.remapMission) {
+        let i = 0;
+        while (i < MISSIONS.length && MISSIONS[i].done(this)) i++;
+        this.s.mission = i;
+      }
+      this.offlineReport = this.applyOffline();
+    } catch (error) {
+      if (!saved) throw error;
+      this.saveProblem = 'unreadable';
+      this.s = this.fresh();
+      this.statCache.clear();
+      this.recalc();
+      this.ops.syncPeriods();
     }
-    this.offlineReport = this.applyOffline();
+    this.remapMission = false;
+    if (saved && this.storedSave === null) this.save();
   }
 
   on(ev: EventName, fn: (msg?: string) => void) {
@@ -1710,7 +1720,7 @@ export class Game {
   private fresh(): SaveData {
     const starter: Machine = { id: 'm1', name: 'Alter Familien-PC', build: cloneBuild(STARTER_PC) };
     return {
-      v: 3, release: SAVE_RELEASE, ops: restoreOperations(), boosts: {}, cash: 350, wallet: {}, staked: {}, soldEur: 0, minedTotal: 0, bought: 0, playSec: 0,
+      v: 3, ops: restoreOperations(), boosts: {}, cash: 350, wallet: {}, staked: {}, soldEur: 0, minedTotal: 0, bought: 0, playSec: 0,
       machines: { m1: starter }, parts: {}, blueprints: [], draft: emptyBuild(), mid: 2, addr: makeAddr(), nick: '',
       rooms: { kid: ['m1', null] }, cond: { kid: 100 }, roomCoin: { kid: 'MON' }, upgrades: {}, staff: {},
       research: [], researching: null, debt: 0, insured: false, mode: 'pool', autoSell: { on: false, min: 100 },
@@ -1723,10 +1733,25 @@ export class Game {
 
   private load(): SaveData | null {
     try {
-      const raw = localStorage.getItem(slotKey(this.slot));
-      if (!raw) return null;
-      const data = JSON.parse(raw);
-      return data?.release === SAVE_RELEASE ? this.migrate(data) : null;
+      this.storedSave = localStorage.getItem(slotKey(this.slot));
+      if (this.storedSave !== null) {
+        const saved = this.readSave(this.storedSave);
+        if (!saved) this.saveProblem = 'unreadable';
+        return saved;
+      }
+      for (const raw of previousSaves(this.slot)) {
+        const saved = this.readSave(raw);
+        if (saved) return saved;
+      }
+    } catch {
+      this.saveProblem = 'storage';
+    }
+    return null;
+  }
+
+  private readSave(raw: string): SaveData | null {
+    try {
+      return this.migrate(JSON.parse(raw));
     } catch {
       return null;
     }
@@ -1736,7 +1761,7 @@ export class Game {
   private remapMission = false;
 
   private migrate(d: Record<string, unknown>): SaveData | null {
-    if (!d || typeof d !== 'object') return null;
+    if (!d || typeof d !== 'object' || !Number.isFinite(d.cash) || !d.rooms || typeof d.rooms !== 'object') return null;
     const base = this.fresh();
     let src = d as Record<string, unknown>;
     if (src.v === 1) {
@@ -1766,7 +1791,9 @@ export class Game {
       delete src.inv;
       this.remapMission = true;
     }
-    if (src.v !== 3) return null;
+    if (src.v !== 3 || !src.machines || typeof src.machines !== 'object') return null;
+    src = { ...src };
+    delete src.release;
     const m = { ...base, ...(src as unknown as SaveData) };
     m.stats = { ...base.stats, ...m.stats };
     m.ops = restoreOperations(src.ops, Object.keys(m.machines));
@@ -1812,45 +1839,65 @@ export class Game {
     return m;
   }
 
-  /** true während Reset/Import: verhindert, dass beforeunload den alten Stand zurückschreibt. */
+  /** Verhindert Schreibzugriffe beim Neuladen nach Reset, Import oder Slotwechsel. */
   private noSave = false;
 
+  get saveWarning(): string | null {
+    switch (this.saveProblem) {
+      case 'unreadable': return 'Der vorhandene Spielstand konnte nicht geladen werden und bleibt erhalten.';
+      case 'storage': return 'Der Browser konnte den Spielstand nicht speichern oder lesen. Sichere den Code in den Einstellungen.';
+      case 'changed': return 'Ein anderer Tab hat den Spielstand geändert. Lade das Spiel neu.';
+      default: return null;
+    }
+  }
+
   save() {
-    if (this.noSave || this.paused || this.offlineBatch) return;
-    this.s.savedAt = Date.now();
+    if (this.noSave || this.paused || this.offlineBatch || this.saveProblem === 'unreadable' || this.saveProblem === 'changed') return;
     try {
-      localStorage.setItem(slotKey(this.slot), JSON.stringify(this.s));
+      const key = slotKey(this.slot);
+      if (localStorage.getItem(key) !== this.storedSave) {
+        this.saveProblem = 'changed';
+        this.toast(this.saveWarning!);
+        return;
+      }
+      const savedAt = Date.now();
+      const next = JSON.stringify({ ...this.s, savedAt });
+      localStorage.setItem(key, next);
+      this.storedSave = next;
+      this.s.savedAt = savedAt;
+      this.saveProblem = null;
     } catch {
-      /* Speicher nicht verfügbar */
+      const alreadyReported = this.saveProblem === 'storage';
+      this.saveProblem = 'storage';
+      if (!alreadyReported) this.toast(this.saveWarning!);
     }
   }
 
   exportSave(): string {
-    this.save();
-    const data = new TextEncoder().encode(JSON.stringify(this.s));
+    const raw = this.saveProblem === 'unreadable' ? this.storedSave : null;
+    const data = new TextEncoder().encode(raw ?? JSON.stringify(this.s));
     return btoa(Array.from(data, (byte) => String.fromCharCode(byte)).join(''));
   }
 
-  importSave(code: string): 'invalid' | 'wrong-release' | 'loaded' {
+  importSave(code: string): boolean {
     try {
       const raw = atob(code.trim());
-      let d: unknown;
+      let data: unknown;
       try {
         const bytes = Uint8Array.from(raw, (character) => character.charCodeAt(0));
-        d = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+        data = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
       } catch {
-        d = JSON.parse(raw);
+        data = JSON.parse(raw);
       }
-      if (!d || typeof d !== 'object' || !('v' in d)) return 'invalid';
-      if (!('release' in d) || d.release !== SAVE_RELEASE) return 'wrong-release';
-      const save = this.migrate(d as Record<string, unknown>);
-      if (!save) return 'invalid';
-      localStorage.setItem(slotKey(this.slot), JSON.stringify(save));
+      if (!this.migrate(data as Record<string, unknown>)) return false;
+      const key = slotKey(this.slot);
+      if (localStorage.getItem(key) !== this.storedSave) return false;
+      localStorage.setItem(key, JSON.stringify(data));
       this.noSave = true;
       location.reload();
-      return 'loaded';
+      return true;
     } catch {
-      return 'invalid';
+      return false;
     }
   }
 
@@ -1868,13 +1915,19 @@ export class Game {
   }
 
   reset() {
-    this.noSave = true;
     try {
-      localStorage.removeItem(slotKey(this.slot));
+      const key = slotKey(this.slot);
+      if (localStorage.getItem(key) !== this.storedSave) {
+        this.toast('Ein anderer Tab hat den Spielstand geändert. Lade das Spiel neu.');
+        return;
+      }
+      // A fresh stable save prevents archived releases from being imported again after a reset.
+      localStorage.setItem(key, JSON.stringify(this.fresh()));
+      this.noSave = true;
+      location.reload();
     } catch {
-      /* ignorieren */
+      this.toast('Spielstand konnte nicht gelöscht werden.');
     }
-    location.reload();
   }
 
   pauseForOffline() {

@@ -207,13 +207,8 @@ export class HUD {
     game.on('change', () => this.renderAll());
     game.on('toast', (m) => this.toast(m ?? ''));
     this.renderAll();
-    if (game.newRelease) {
-      this.modal(`<h2>Neue Spielversion</h2><p>Dieses Update startet einen neuen Spielstand. Deine bisherigen Speicherplätze bleiben im Browser archiviert.</p>
-        <div class="btns"><button type="button" class="primary" id="start-new-release">Neu starten</button></div>`, (m) => {
-        m.onclick = null;
-        m.querySelector('#start-new-release')?.addEventListener('click', () => this.tutorial(0));
-      });
-    } else if (!game.s.tutorial) this.tutorial(0);
+    if (game.saveWarning) this.settingsModal();
+    else if (!game.s.tutorial) this.tutorial(0);
     requestAnimationFrame(() => this.loop());
   }
 
@@ -290,7 +285,9 @@ export class HUD {
 
   private settingsModal() {
     const code = game.exportSave();
+    const warning = game.saveWarning;
     this.modal(`<h2>Einstellungen</h2>
+      ${warning ? `<p role="alert">${escapeHtml(warning)}</p>` : ''}
       <label><span>Nickname</span></label><input id="nick" class="txt" maxlength="20" placeholder="Dein Name" value="${game.s.nick}">
       <label><span>Musik</span><b id="mv">${Math.round(settings.music * 100)} %</b></label><input type="range" id="music" min="0" max="100" value="${settings.music * 100}">
       <label><span>Soundeffekte</span><b id="sv">${Math.round(settings.sfx * 100)} %</b></label><input type="range" id="sfxv" min="0" max="100" value="${settings.sfx * 100}">
@@ -320,9 +317,7 @@ export class HUD {
         });
       }
       q('#doimp').addEventListener('click', () => {
-        const result = game.importSave((q('#imp') as HTMLTextAreaElement).value);
-        if (result === 'wrong-release') this.toast('Spielstand gehört zu einer anderen Version.');
-        if (result === 'invalid') this.toast('Kein gültiger Code.');
+        if (!game.importSave((q('#imp') as HTMLTextAreaElement).value)) this.toast('Spielstand konnte nicht geladen werden.');
       });
       q('#tut').addEventListener('click', () => this.tutorial(0));
       q('#nick').addEventListener('change', (e) => { game.setNick((e.target as HTMLInputElement).value); this.toast('Nickname gespeichert.'); });
