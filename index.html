@@ -62,7 +62,7 @@
   /* Panel */
   #panel { position: absolute; top: var(--hud-start, 82px); right: 10px; bottom: 10px; width: var(--panel-width); display: flex; flex-direction: column; overflow: hidden; }
   #tab-toggle { display: none; }
-  #tabs { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); flex: none; gap: 2px; padding: 6px; border-bottom: 1px solid var(--line); }
+  #tabs { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); flex: none; gap: 2px; padding: 6px; border-bottom: 1px solid var(--line); }
   #tabs button { min-width: 0; }
   #tabs button[data-tab="ops"] { color: #70e6d8; background: #4fd1c51a; }
   #tab-toggle:focus-visible, #tabs button:focus-visible, #content button:focus-visible { outline: 2px solid var(--acc); outline-offset: -2px; }
@@ -302,11 +302,11 @@
     .boost { min-width: 0; font-size: 11px; padding: 4px 8px; }
     #tab-toggle { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 4px; min-height: 40px; flex: none; text-align: left; }
     #tab-toggle span { color: var(--acc); }
-    #tabs { display: none; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; }
+    #tabs { display: none; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; }
     #panel.tabs-open #tabs { display: grid; flex: 1 1 auto; min-height: 0; overflow-y: auto; align-content: start; }
     #panel.tabs-open #content { display: none; }
     #tabs button { min-height: 40px; border: 1px solid var(--line); }
-    #tabs button span { font-size: 11px; }
+    #tabs button span { font-size: clamp(9px, 2.45vw, 11px); }
   }
 </style>
 <link rel="stylesheet" href="/src/operations.css">

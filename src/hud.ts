@@ -14,9 +14,9 @@ import { keys } from './operations-state';
 import { SAVE_SLOTS, slotPreview } from './save-slots';
 import { GRID_SHORTAGE, GRID_WARNING, WorkshopJobs } from './activities';
 
-type Tab = 'shop' | 'build' | 'inv' | 'market' | 'chain' | 'bank' | 'tech' | 'tasks' | 'ach' | 'rooms' | 'ops' | 'more';
+type Tab = 'shop' | 'build' | 'orders' | 'inv' | 'market' | 'chain' | 'bank' | 'tech' | 'tasks' | 'ach' | 'rooms' | 'ops' | 'more';
 const TABS: [Tab, string, string][] = [
-  ['ops', '⚡', 'Betrieb'], ['shop', '🛒', 'Shop'], ['build', '🛠️', 'Werkstatt'], ['inv', '🎒', 'Lager'], ['market', '📊', 'Markt'], ['chain', '🌐', 'Explorer'],
+  ['ops', '⚡', 'Betrieb'], ['shop', '🛒', 'Shop'], ['build', '🛠️', 'Werkstatt'], ['orders', '📋', 'Aufträge'], ['inv', '🎒', 'Lager'], ['market', '📊', 'Markt'], ['chain', '🌐', 'Explorer'],
   ['bank', '🏦', 'Bank'], ['tech', '🔬', 'Tech'], ['tasks', '🎯', 'Aufgaben'], ['ach', '🏆', 'Erfolge'], ['rooms', '🏠', 'Räume'], ['more', '⚙️', 'Mehr'],
 ];
 const KIND_NAME: Record<Kind, string> = { cpu: 'CPU', gpu: 'GPU', asic: 'ASIC', quantum: 'Quantum', fusion: 'Fusion' };
@@ -418,6 +418,12 @@ export class HUD {
       case 'forecast-pre': this.previewPurchase('pre', id); break;
       case 'forecast-part': this.previewPurchase('part', id); break;
       case 'forecast-build': this.previewPurchase('build'); break;
+      case 'open-workshop':
+      case 'open-workshop-orders':
+        this.tab = act === 'open-workshop' ? 'build' : 'orders';
+        this.renderAll();
+        $('content').scrollTop = 0;
+        break;
       case 'workshop-deliver': game.deliverWorkshopOrder(id); break;
       case 'buy-part': game.buyPart(id); break;
       case 'sell-part': game.sellPart(id); break;
@@ -546,6 +552,7 @@ export class HUD {
       case 'ops': h = renderOperations(game, this.opsTab); break;
       case 'shop': h = this.shop(); break;
       case 'build': h = this.workshop(); break;
+      case 'orders': h = this.workshopJobs(); break;
       case 'chain': h = this.explorer(); break;
       case 'inv': h = this.inventory(); break;
       case 'market': h = this.market(); break;
@@ -657,7 +664,10 @@ export class HUD {
   }
 
   private workshopJobs(): string {
-    return title('Werkstattaufträge') + WorkshopJobs.map(({ id }) => {
+    return title('Kunden-PC-Aufträge')
+      + '<p class="muted">Konfiguriere einen PC in der Werkstatt und liefere ihn hier an den Kunden. Jeder Auftrag ist einmal pro Spieltag verfügbar.</p>'
+      + '<div class="btns"><button type="button" data-act="open-workshop">Zur Werkstatt</button></div>'
+      + WorkshopJobs.map(({ id }) => {
       const offer = game.workshopOffer(id)!;
       const { job, cost, catalog, done, locked, fits } = offer;
       const status = done ? 'Heute geliefert' : locked ? 'Benötigt Effizienz-Firmware'
@@ -773,7 +783,7 @@ export class HUD {
       </div>
       ${missing.length ? `<div class="muted" style="margin-top:4px">Wird gekauft: ${missing.map((id) => shortName(partDef(id))).join(', ')}</div>` : ''}
     </div>`;
-    h += this.workshopJobs();
+    h += '<div class="btns"><button type="button" data-act="open-workshop-orders">Zu den Kunden-PC-Aufträgen</button></div>';
     h += CAT_ORDER.filter((c) => c !== 'gpu' && c !== 'cool').map(row).join('') + gpuRow() + row('cool');
     h += title(`Blueprints ${game.s.blueprints.length}/12`);
     h += game.s.blueprints.length ? game.s.blueprints.map((bp) => {
