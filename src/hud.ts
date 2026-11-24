@@ -100,7 +100,7 @@ export class HUD {
   private shopCat: PartCat = 'gpu';
   private bpName = '';
   private cash = new Counter($('cash'), eur, true);
-  private coins = new Counter($('coins'), (n) => num(n, 4));
+  private coins = new Counter($('coins'), (n) => num(n, 2));
   private price = new Counter($('price'), (n) => (n < 10 ? `${num(n, 2)} €` : eur(n)));
   private hash = new Counter($('hash'), (n) => `${num(n)} H/s`);
   private debt = new Counter($('debt'), eur);

@@ -259,17 +259,29 @@
 
   /* Mobil */
   @media (max-width: 899px) {
-    #quest, .pill small { display: none; }
+    #quest { display: none; }
     .logo { margin: 0; font-size: 14px; min-width: 0; }
     #top { top: 6px; left: 6px; right: 6px; padding: 6px; gap: 6px; display: grid; grid-template-columns: minmax(0, 1fr) auto; }
     #top .tools { grid-column: 2; grid-row: 1; }
-    #top .stats { grid-column: 1 / -1; grid-row: 2; gap: 5px; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
-    .stats::-webkit-scrollbar { display: none; }
-    .pill { flex: none; }
-    .pill { padding: 4px 8px 4px 4px; gap: 5px; }
-    .pill i { width: 22px; height: 22px; font-size: 12px; }
-    .pill b { font-size: 12.5px; }
-    #spark { width: 54px; height: 22px; }
+    #top .stats {
+      grid-column: 1 / -1;
+      grid-row: 2;
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 5px;
+    }
+    #top .pill { padding: 4px; gap: 4px; border-radius: 8px; }
+    #top .pill > div { min-width: 0; }
+    #top .pill i { width: 17px; height: 20px; font-size: 11px; }
+    #top .pill small { font-size: 9px; letter-spacing: .2px; }
+    #top .pill b { font-size: 12px; white-space: normal; overflow-wrap: anywhere; }
+    #top .chart { order: 1; grid-column: span 2; }
+    #top .net { order: 2; }
+    #top .debt { order: 3; grid-column: 1 / -1; }
+    #top .debt > div { display: flex; align-items: baseline; gap: 6px; }
+    #spark { width: clamp(30px, 10vw, 72px); height: 22px; margin-left: auto; }
+    #regime { font-size: 9px; }
+    #chg { font-size: 10px; }
     #panel { left: 6px; right: 6px; width: auto; top: auto; bottom: 6px; height: 34vh; }
     #dock { left: 6px; right: 6px; bottom: calc(34vh + 12px); gap: 6px; }
     .bar { padding: 8px 10px; gap: 8px; flex-wrap: wrap; }
@@ -277,13 +289,13 @@
     .mhead { font-size: 11px; }
     .sell { width: 100%; }
     .sell button { flex: 1; padding: 8px 6px; font-size: 12px; white-space: nowrap; }
-    #toasts { top: 172px; }
-    .deal { right: 6px; left: 6px; top: 128px; max-width: none; }
+    #toasts { top: max(172px, var(--hud-start, 128px)); }
+    .deal { right: 6px; left: 6px; top: var(--hud-start, 128px); max-width: none; }
     .clicker { width: 100%; }
     #mineBtn { flex-direction: row; gap: 6px; padding: 7px 10px; min-width: 0; }
     #mineBtn span { font-size: 15px; }
     .odm { flex: 1; width: auto; }
-    body.noscene #dock { width: auto; right: 6px; top: 124px; bottom: auto; }
+    body.noscene #dock { width: auto; right: 6px; top: var(--hud-start, 124px); bottom: auto; }
     body.noscene #panel { left: 6px; height: auto; }
     .roomrow, .coinrow { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
     .roomrow .chip { white-space: nowrap; padding: 5px 10px; font-size: 12px; }
