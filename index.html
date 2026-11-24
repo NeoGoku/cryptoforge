@@ -251,6 +251,61 @@
   .slot-grid button { min-width: 0; min-height: 42px; overflow-wrap: anywhere; padding: 5px; }
   .placement-status { display: block; margin-top: 6px; }
   #content { overflow-wrap: anywhere; }
+  /* Desktop: permanente linke Navigation, Spielraum in der Mitte, Bereich rechts. */
+  @media (min-width: 1200px) {
+    #quest { width: 190px; }
+    #tabs {
+      position: fixed;
+      z-index: 2;
+      left: 10px;
+      top: calc(var(--hud-start, 82px) + 142px);
+      bottom: clamp(140px, 19vh, 190px);
+      width: 190px;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
+      align-content: start;
+      gap: 4px;
+      overflow-y: auto;
+      padding: 8px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: var(--panel);
+      box-shadow: 0 12px 40px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.05);
+      scrollbar-width: thin;
+      scrollbar-color: #2a3554 transparent;
+    }
+    #tabs button {
+      min-height: 38px;
+      flex: none;
+      flex-direction: row;
+      justify-content: flex-start;
+      gap: 10px;
+      padding: 7px 10px;
+      text-align: left;
+    }
+    #tabs button i { width: 20px; font-size: 16px; }
+    #tabs button span { font-size: 12px; }
+    #tabs button.on { box-shadow: inset 3px 0 0 var(--acc); }
+    #tabs button[data-tab="ops"] { color: #70e6d8; background: #4fd1c51a; }
+    .badge { right: 8px; }
+    #panel {
+      width: var(--panel-width);
+      overflow: visible;
+      background: transparent;
+      border: 0;
+      box-shadow: none;
+    }
+    #content {
+      height: 100%;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: var(--panel);
+      box-shadow: 0 12px 40px rgba(0,0,0,.38), inset 0 1px 0 rgba(255,255,255,.05);
+    }
+    #dock { left: 210px; }
+    body.noscene #dock { left: 210px; right: calc(var(--panel-width) + 20px); width: auto; }
+    body.noscene #panel { left: auto; width: var(--panel-width); }
+  }
   @media (min-width: 900px) and (max-width: 1120px) {
     #dock .bar { gap: 8px; flex-wrap: wrap; }
     #dock .meter { flex-basis: 100%; }

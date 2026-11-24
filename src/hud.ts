@@ -708,9 +708,11 @@ export class HUD {
       }).join('');
     }
     h += `<div class="chips" style="margin:0 0 10px">${CAT_ORDER.map((c) => `<button data-act="shop-cat" data-cat="${c}" class="${this.shopCat === c ? 'on' : ''}">${CATS[c].icon} ${CATS[c].name}</button>`).join('')}</div>`;
-    return h + PARTS.filter((p) => p.cat === this.shopCat).map((p) => {
+    return h + PARTS.filter((p) => p.cat === this.shopCat)
+      .map((p) => ({ part: p, price: game.partPrice(p.id) }))
+      .sort((a, b) => a.price - b.price || a.part.name.localeCompare(b.part.name, 'de'))
+      .map(({ part: p, price: cost }) => {
       const locked = !game.unlocked(p);
-      const cost = game.partPrice(p.id);
       const have = game.s.parts[p.id] ?? 0;
       return `<div class="card ${locked ? 'lock' : ''}" style="--c:${hex(p.color)}">
         <div class="head">${partIcon(p)}<div style="flex:1"><div class="row"><span class="name">${p.name}</span>${have ? `<span class="tag" style="--c:var(--acc)">Lager ${have}</span>` : ''}</div><div class="muted">${p.brand} · ${this.partStats(p)}</div></div></div>
