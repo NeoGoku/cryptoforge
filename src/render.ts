@@ -168,22 +168,34 @@ function drawDeco(g: G, d: Deco, led: LedFn) {
       case 'plant': {
       box(g, u, v, du, dv, 12, 0xa0522d);
       const c = P(u + du / 2, v + dv / 2, 12);
-      g.fillStyle(0x2d7a37, 1);
-      g.fillCircle(c.x, c.y - 12 * zoom, 15 * zoom);
-      g.fillStyle(0x4caf50, 1);
-      g.fillCircle(c.x - 5 * zoom, c.y - 18 * zoom, 10 * zoom);
-      g.fillStyle(0x7ed67f, 0.8);
-      g.fillCircle(c.x - 8 * zoom, c.y - 22 * zoom, 4 * zoom);
+      const z = zoom;
+      // Tall palm silhouette, sized to remain recognizable on the room canvas.
+      g.lineStyle(4 * DPR * z, 0x80532f, 1);
+      g.lineBetween(c.x, c.y - 5 * z, c.x + 2 * z, c.y - 39 * z);
+      const fronds: [number, number, number, number][] = [[-24,-45,-8,-37],[-22,-56,-6,-41],[-12,-64,-3,-42],[8,-65,4,-42],[21,-57,8,-40],[25,-45,9,-36]];
+      for (const [dx, dy, ex, ey] of fronds) {
+        g.lineStyle(3 * DPR * z, 0x26723a, 1);
+        g.lineBetween(c.x + 2 * z, c.y - 39 * z, c.x + dx * z, c.y + dy * z);
+        g.lineStyle(1.5 * DPR * z, 0x79ce69, 0.9);
+        g.lineBetween(c.x + 2 * z, c.y - 39 * z, c.x + ex * z, c.y + ey * z);
+      }
+      g.fillStyle(0xb86e36, 1);
+      g.fillPoints([P(u + 0.05, v + 0.05, 17), P(u + du - 0.05, v + 0.05, 17), P(u + du - 0.12, v + dv - 0.06, 3), P(u + 0.12, v + dv - 0.06, 3)], true);
       break;
     }
     case 'lamp': {
       const p = P(u + du / 2, 0, 72);
-      g.fillStyle(0x352c20, 1);
-      g.fillPoints([P(u, 0, 82), P(u + du, 0, 82), P(u + du, 0, 66), P(u, 0, 66)], true);
-      g.fillStyle(0xffd479, 1);
-      g.fillPoints([P(u + 0.12, 0, 78), P(u + du - 0.12, 0, 78), P(u + du - 0.12, 0, 70), P(u + 0.12, 0, 70)], true);
-      g.fillStyle(0xffd479, 0.12);
-      g.fillCircle(p.x, p.y + 14 * zoom, 25 * zoom);
+      const a = P(u, 0, 84), b = P(u + du, 0, 84), c = P(u + du, 0, 64), d0 = P(u, 0, 64);
+      g.fillStyle(0xffbd4a, 0.11);
+      g.fillPoints([P(u - 1.3, 2.4, 2), P(u + du + 1.3, 2.4, 2), P(u + du + 0.4, 0.1, 35), P(u - 0.4, 0.1, 35)], true);
+      g.fillStyle(0x302a27, 1);
+      g.fillPoints([a, b, c, d0], true);
+      g.lineStyle(3 * DPR, 0xffd479, 1);
+      line(g, P(u + 0.12, 0, 75), P(u + du - 0.12, 0, 75));
+      g.fillStyle(0xffe6a1, 1);
+      g.fillPoints([P(u + 0.12, 0, 78), P(u + du - 0.12, 0, 78), P(u + du - 0.12, 0, 71), P(u + 0.12, 0, 71)], true);
+      g.fillStyle(0xffd479, 0.22);
+      g.fillCircle(p.x, p.y + 24 * zoom, 40 * zoom);
       led(p.x, p.y, 0xffd479, u);
       break;
     }

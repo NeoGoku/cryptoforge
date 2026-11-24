@@ -162,7 +162,8 @@ function roomsPanel(g: Game) {
       + section('Einrichtung & Technik')
       + keys(SITE_SHOP).map((id) => {
         const entry = SITE_SHOP[id], owned = items.includes(id);
-        return `<div class="cf-ops-upgrade"><span>${escapeHtml(entry.name)}<small>${escapeHtml(entry.description)}</small></span>${act(owned ? 'Installiert' : `Kaufen · ${eur(entry.cost)}`, 'room-site', `${room.id}:${id}`, owned || g.s.cash < entry.cost, owned)}</div>`;
+        const visible = id === 'plant' ? '🌴 Palme im Raum sichtbar' : id === 'lighting' ? '💡 LED-Beleuchtung sichtbar' : id === 'interior' ? '🗄️ Interieur im Raum sichtbar' : id === 'purifier' ? '🌬️ Luftreiniger im Raum sichtbar' : 'Installiert';
+        return `<div class="cf-ops-upgrade"><span>${escapeHtml(entry.name)}<small>${escapeHtml(entry.description)}${owned && ['plant','lighting','interior','purifier'].includes(id) ? ' · dauerhaft aufgestellt' : ''}</small></span>${act(owned ? visible : `Kaufen & aufstellen · ${eur(entry.cost)}`, 'room-site', `${room.id}:${id}`, owned || g.s.cash < entry.cost, owned)}</div>`;
       }).join(''));
   }
   return html + description('Raumgestaltung wirkt dauerhaft auf alle Miner im jeweiligen Raum. Kleine Dekor-Boni addieren sich; Technik-Upgrades bleiben separat sichtbar.')
