@@ -207,7 +207,8 @@ export class HUD {
     game.on('change', () => this.renderAll());
     game.on('toast', (m) => this.toast(m ?? ''));
     this.renderAll();
-    if (game.saveWarning) this.settingsModal();
+    if (game.requiresNewSave) this.newReleaseModal();
+    else if (game.saveWarning) this.settingsModal();
     else if (!game.s.tutorial) this.tutorial(0);
     requestAnimationFrame(() => this.loop());
   }
@@ -246,6 +247,34 @@ export class HUD {
   }
 
   // ---- Modals ----
+
+  private newReleaseModal() {
+    const background = [ ...$('hud').children, $('game') ]
+      .filter((element): element is HTMLElement => element instanceof HTMLElement && element.id !== 'modal');
+    for (const element of background) element.inert = true;
+    this.modal(`<h2 id="release-title">Neue Spielversion</h2>
+      <p>Erstelle einen neuen Spielstand, um weiterzuspielen. Bisherige Spielstände bleiben im Browser archiviert.</p>
+      <p id="release-error" role="alert" hidden></p>
+      <div class="btns"><button type="button" class="primary" id="start-new-release">Neuen Spielstand erstellen</button></div>`, (modal) => {
+      modal.onclick = null;
+      const dialog = modal.querySelector('.dlg')!;
+      dialog.setAttribute('role', 'dialog');
+      dialog.setAttribute('aria-modal', 'true');
+      dialog.setAttribute('aria-labelledby', 'release-title');
+      const start = modal.querySelector<HTMLButtonElement>('#start-new-release')!;
+      start.focus();
+      start.addEventListener('click', () => {
+        if (!game.startNewRelease()) {
+          const error = modal.querySelector<HTMLElement>('#release-error')!;
+          error.hidden = false;
+          error.textContent = 'Der Spielstand konnte nicht angelegt werden. Prüfe den Browserspeicher oder lade die Seite neu.';
+          return;
+        }
+        for (const element of background) element.inert = false;
+        this.tutorial(0);
+      });
+    });
+  }
 
   private modal(html: string, bind?: (root: HTMLElement) => void) {
     const m = $('modal');
@@ -317,7 +346,7 @@ export class HUD {
         });
       }
       q('#doimp').addEventListener('click', () => {
-        if (!game.importSave((q('#imp') as HTMLTextAreaElement).value)) this.toast('Spielstand konnte nicht geladen werden.');
+        if (!game.importSave((q('#imp') as HTMLTextAreaElement).value)) this.toast('Spielstand ungültig oder aus einer anderen Version.');
       });
       q('#tut').addEventListener('click', () => this.tutorial(0));
       q('#nick').addEventListener('change', (e) => { game.setNick((e.target as HTMLInputElement).value); this.toast('Nickname gespeichert.'); });

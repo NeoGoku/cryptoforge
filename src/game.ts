@@ -7,7 +7,7 @@ import type { Holder } from './world';
 import { Operations } from './operations';
 import { restoreOperations } from './operations-state';
 import { DAY_SECONDS } from './operations-data';
-import { activeSlot, previousSaves, selectSlot, slotKey } from './save-slots';
+import { activeSlot, hasPreviousSaves, SAVE_RELEASE, selectSlot, slotKey } from './save-slots';
 import type { SaveSlot } from './save-slots';
 
 export const BASE_TARIFF = 0.32;   // EUR/kWh
@@ -46,6 +46,7 @@ export interface Stats {
 
 export interface SaveData {
   v: 3;
+  release: string;
   ops: ReturnType<typeof restoreOperations>;
   boosts: Record<string, number>; // Bonus-ID → Ende (playSec)
   cash: number;
@@ -262,6 +263,8 @@ const yesterdayStr = (): string => {
 export class Game {
   s: SaveData;
   readonly slot = activeSlot();
+  private releasePending = false;
+  get requiresNewSave() { return this.releasePending; }
   readonly ops = new Operations(this, () => this.afterChange());
   grid!: ReturnType<Operations['gridLoad']>;
   prices: Record<string, number> = {};
@@ -312,6 +315,7 @@ export class Game {
 
   constructor() {
     const saved = this.load();
+    this.releasePending = this.storedSave === null && hasPreviousSaves();
     this.s = saved ?? this.fresh();
     for (const c of COINS) {
       this.prices[c.id] = c.base;
@@ -325,7 +329,7 @@ export class Game {
         while (i < MISSIONS.length && MISSIONS[i].done(this)) i++;
         this.s.mission = i;
       }
-      this.offlineReport = this.applyOffline();
+      this.offlineReport = saved ? this.applyOffline() : null;
     } catch (error) {
       if (!saved) throw error;
       this.saveProblem = 'unreadable';
@@ -743,7 +747,7 @@ export class Game {
   // ---- Haupt-Schleife ----
 
   update(dtRaw: number) {
-    if (this.paused) return;
+    if (this.paused || this.releasePending) return;
     const dt = Math.min(Math.max(dtRaw, 0), 0.25);
     const s = this.s;
     s.playSec += dt;
@@ -1720,7 +1724,7 @@ export class Game {
   private fresh(): SaveData {
     const starter: Machine = { id: 'm1', name: 'Alter Familien-PC', build: cloneBuild(STARTER_PC) };
     return {
-      v: 3, ops: restoreOperations(), boosts: {}, cash: 350, wallet: {}, staked: {}, soldEur: 0, minedTotal: 0, bought: 0, playSec: 0,
+      v: 3, release: SAVE_RELEASE, ops: restoreOperations(), boosts: {}, cash: 350, wallet: {}, staked: {}, soldEur: 0, minedTotal: 0, bought: 0, playSec: 0,
       machines: { m1: starter }, parts: {}, blueprints: [], draft: emptyBuild(), mid: 2, addr: makeAddr(), nick: '',
       rooms: { kid: ['m1', null] }, cond: { kid: 100 }, roomCoin: { kid: 'MON' }, upgrades: {}, staff: {},
       research: [], researching: null, debt: 0, insured: false, mode: 'pool', autoSell: { on: false, min: 100 },
@@ -1739,10 +1743,6 @@ export class Game {
         if (!saved) this.saveProblem = 'unreadable';
         return saved;
       }
-      for (const raw of previousSaves(this.slot)) {
-        const saved = this.readSave(raw);
-        if (saved) return saved;
-      }
     } catch {
       this.saveProblem = 'storage';
     }
@@ -1751,7 +1751,8 @@ export class Game {
 
   private readSave(raw: string): SaveData | null {
     try {
-      return this.migrate(JSON.parse(raw));
+      const data = JSON.parse(raw);
+      return data?.release === SAVE_RELEASE ? this.migrate(data) : null;
     } catch {
       return null;
     }
@@ -1851,8 +1852,30 @@ export class Game {
     }
   }
 
+  startNewRelease(): boolean {
+    if (!this.releasePending) return false;
+    try {
+      const key = slotKey(this.slot);
+      if (localStorage.getItem(key) !== null) return false;
+      const fresh = this.fresh();
+      const raw = JSON.stringify(fresh);
+      localStorage.setItem(key, raw);
+      this.storedSave = raw;
+      this.s = fresh;
+      this.releasePending = false;
+      this.saveProblem = null;
+      this.statCache.clear();
+      this.recalc();
+      this.ops.syncPeriods();
+      this.emit('change');
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   save() {
-    if (this.noSave || this.paused || this.offlineBatch || this.saveProblem === 'unreadable' || this.saveProblem === 'changed') return;
+    if (this.releasePending || this.noSave || this.paused || this.offlineBatch || this.saveProblem === 'unreadable' || this.saveProblem === 'changed') return;
     try {
       const key = slotKey(this.slot);
       if (localStorage.getItem(key) !== this.storedSave) {
@@ -1880,6 +1903,7 @@ export class Game {
   }
 
   importSave(code: string): boolean {
+    if (this.releasePending) return false;
     try {
       const raw = atob(code.trim());
       let data: unknown;
@@ -1889,6 +1913,7 @@ export class Game {
       } catch {
         data = JSON.parse(raw);
       }
+      if (!data || typeof data !== 'object' || !('release' in data) || data.release !== SAVE_RELEASE) return false;
       if (!this.migrate(data as Record<string, unknown>)) return false;
       const key = slotKey(this.slot);
       if (localStorage.getItem(key) !== this.storedSave) return false;
@@ -1902,6 +1927,7 @@ export class Game {
   }
 
   switchSlot(slot: SaveSlot): boolean {
+    if (this.releasePending) return false;
     if (slot === this.slot) return true;
     try {
       this.save();
@@ -1915,13 +1941,13 @@ export class Game {
   }
 
   reset() {
+    if (this.releasePending) return;
     try {
       const key = slotKey(this.slot);
       if (localStorage.getItem(key) !== this.storedSave) {
         this.toast('Ein anderer Tab hat den Spielstand geändert. Lade das Spiel neu.');
         return;
       }
-      // A fresh stable save prevents archived releases from being imported again after a reset.
       localStorage.setItem(key, JSON.stringify(this.fresh()));
       this.noSave = true;
       location.reload();
@@ -1939,7 +1965,7 @@ export class Game {
   resumeOffline(): OfflineReport | null {
     if (!this.paused || this.noSave) return null;
     this.paused = false;
-    return this.applyOffline();
+    return this.releasePending ? null : this.applyOffline();
   }
 
   private applyOffline(): OfflineReport | null {
