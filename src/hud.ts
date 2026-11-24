@@ -1,4 +1,5 @@
-import { game, MISSIONS, ACHIEVEMENTS, INSURE_RATE, LOAN_RATE, POOL_FEE, BOOST_INFO, OD_MAX } from './game';
+import { game, MISSIONS, ACHIEVEMENTS, INSURE_RATE, LOAN_RATE, POOL_FEE, BOOST_INFO, OD_MAX, OFFLINE_CAP } from './game';
+import type { OfflineReport } from './game';
 import { ROOMS, UPGRADES, STAFF, TECHS, COINS, LOANS, DEFAULT_COIN, upgradeCost, staffCost, coinDef, techDef } from './config';
 import type { Kind } from './config';
 import { BUILD_PRESETS, PARTS, PREBUILT, CATS, CAT_ORDER, partDef, prebuiltDef, partLabel, partIcon, machineIcon, buildStats } from './hardware';
@@ -206,7 +207,13 @@ export class HUD {
     game.on('change', () => this.renderAll());
     game.on('toast', (m) => this.toast(m ?? ''));
     this.renderAll();
-    if (!game.s.tutorial) this.tutorial(0);
+    if (game.newRelease) {
+      this.modal(`<h2>Neue Spielversion</h2><p>Dieses Update startet einen neuen Spielstand. Deine bisherigen Speicherplätze bleiben im Browser archiviert.</p>
+        <div class="btns"><button type="button" class="primary" id="start-new-release">Neu starten</button></div>`, (m) => {
+        m.onclick = null;
+        m.querySelector('#start-new-release')?.addEventListener('click', () => this.tutorial(0));
+      });
+    } else if (!game.s.tutorial) this.tutorial(0);
     requestAnimationFrame(() => this.loop());
   }
 
@@ -222,6 +229,25 @@ export class HUD {
     box.appendChild(d);
     while (box.children.length > 4) box.firstElementChild?.remove();
     setTimeout(() => d.remove(), 3300);
+  }
+
+  showOfflineReport(report: OfflineReport) {
+    const rows = COINS.filter((coin) => report.coins[coin.id] > 0)
+      .map((coin) => kv(coin.name, `${num(report.coins[coin.id], 4)} ${coin.id}`)).join('');
+    if ($('modal').style.display === 'grid') {
+      this.toast(`Offline · ${dur(report.miningTime)} gemint${report.research ? ' · Forschung fertig' : ''}`);
+      return;
+    }
+    this.modal(`<h2>Offline-Fortschritt</h2>
+      <p>${dur(report.elapsed)} abwesend · ${dur(report.miningTime)} Mining</p>
+      ${report.elapsed > OFFLINE_CAP ? `<p>Es zählen höchstens ${dur(OFFLINE_CAP)} Abwesenheit.</p>` : ''}
+      ${rows || '<p>Keine Coins gemint.</p>'}
+      ${kv('Automatisch verkauft', eur(report.sold))}
+      ${kv('Laufende Kosten', eur(report.costs))}
+      ${report.research ? kv('Forschung abgeschlossen', escapeHtml(report.research)) : ''}
+      ${report.notices.map((notice) => `<p>${escapeHtml(notice)}</p>`).join('')}
+      <div class="btns"><button class="primary" id="offline-close">Weiterspielen</button></div>`,
+    (m) => m.querySelector('#offline-close')?.addEventListener('click', () => this.closeModal()));
   }
 
   // ---- Modals ----
@@ -293,7 +319,11 @@ export class HUD {
           if (!game.switchSlot(slot)) this.toast('Speicherplatz konnte nicht geöffnet werden.');
         });
       }
-      q('#doimp').addEventListener('click', () => { if (!game.importSave((q('#imp') as HTMLTextAreaElement).value)) this.toast('Kein gültiger Code.'); });
+      q('#doimp').addEventListener('click', () => {
+        const result = game.importSave((q('#imp') as HTMLTextAreaElement).value);
+        if (result === 'wrong-release') this.toast('Spielstand gehört zu einer anderen Version.');
+        if (result === 'invalid') this.toast('Kein gültiger Code.');
+      });
       q('#tut').addEventListener('click', () => this.tutorial(0));
       q('#nick').addEventListener('change', (e) => { game.setNick((e.target as HTMLInputElement).value); this.toast('Nickname gespeichert.'); });
       let armed = false;

@@ -6,7 +6,8 @@ import { makeHolders, makeAddr, holderValue, shortAddr } from './world';
 import type { Holder } from './world';
 import { Operations } from './operations';
 import { restoreOperations } from './operations-state';
-import { activeSlot, selectSlot, slotKey } from './save-slots';
+import { DAY_SECONDS } from './operations-data';
+import { activeSlot, hasPreviousSaves, SAVE_RELEASE, selectSlot, slotKey } from './save-slots';
 import type { SaveSlot } from './save-slots';
 
 export const BASE_TARIFF = 0.32;   // EUR/kWh
@@ -19,8 +20,19 @@ export const SOLO_MEAN = 25;       // Sekunden zwischen Blöcken (Ø)
 export const STAKE_RATE = 0.0025 / 60; // 0,25 % pro Minute
 export const LOAN_RATE = 0.06 / 600;   // 6 % je 10 Minuten
 export const INSURE_RATE = 0.00004;    // EUR/s je EUR Gerätewert
-const OFFLINE_CAP = 2 * 3600;
+export const OFFLINE_CAP = 2 * 3600;
+const OFFLINE_STEP = 15;
 const ACH_REWARD = 110;
+
+export interface OfflineReport {
+  elapsed: number;
+  miningTime: number;
+  coins: Record<string, number>;
+  sold: number;
+  costs: number;
+  research?: string;
+  notices: string[];
+}
 
 export type Slots = (string | null)[];
 export type Regime = 'bull' | 'bear' | 'side';
@@ -34,6 +46,7 @@ export interface Stats {
 
 export interface SaveData {
   v: 3;
+  release: string;
   ops: ReturnType<typeof restoreOperations>;
   boosts: Record<string, number>; // Bonus-ID → Ende (playSec)
   cash: number;
@@ -250,6 +263,7 @@ const yesterdayStr = (): string => {
 export class Game {
   s: SaveData;
   readonly slot = activeSlot();
+  readonly newRelease: boolean;
   readonly ops = new Operations(this, () => this.afterChange());
   grid!: ReturnType<Operations['gridLoad']>;
   prices: Record<string, number> = {};
@@ -264,8 +278,9 @@ export class Game {
   premiumPerSec = 0;
   interestPerSec = 0;
   incomeEurPerSec = 0;
-  offlineGain = 0;
-  offlineEur = 0;
+  offlineReport: OfflineReport | null = null;
+  private offlineBatch: OfflineReport | null = null;
+  private paused = false;
 
   /** Hardware-Preisindex je Markt (1 = Normalpreis). */
   hw: Record<HwMarket, number> = { gpu: 1, asic: 1, parts: 1 };
@@ -295,7 +310,9 @@ export class Game {
   private listeners: Record<EventName, Array<(msg?: string) => void>> = { change: [], toast: [], fx: [] };
 
   constructor() {
-    this.s = this.load() ?? this.fresh();
+    const saved = this.load();
+    this.newRelease = !saved && hasPreviousSaves();
+    this.s = saved ?? this.fresh();
     for (const c of COINS) {
       this.prices[c.id] = c.base;
       this.history[c.id] = [c.base];
@@ -308,7 +325,7 @@ export class Game {
       this.s.mission = i;
       this.remapMission = false;
     }
-    this.applyOffline();
+    this.offlineReport = this.applyOffline();
   }
 
   on(ev: EventName, fn: (msg?: string) => void) {
@@ -316,6 +333,10 @@ export class Game {
   }
 
   private emit(ev: EventName, msg?: string) {
+    if (this.offlineBatch) {
+      if (ev === 'toast' && msg?.startsWith('Leasing')) this.offlineBatch.notices.push(msg);
+      return;
+    }
     for (const f of this.listeners[ev]) f(msg);
   }
 
@@ -712,6 +733,7 @@ export class Game {
   // ---- Haupt-Schleife ----
 
   update(dtRaw: number) {
+    if (this.paused) return;
     const dt = Math.min(Math.max(dtRaw, 0), 0.25);
     const s = this.s;
     s.playSec += dt;
@@ -762,19 +784,7 @@ export class Game {
       if (st > 0) s.staked[c.id] = st + st * STAKE_RATE * dt;
     }
 
-    // Verschleiß
-    if (running && this.grid.throttle > 0) {
-      this.ops.train(dt);
-      const techF = 1 - 0.3 * (s.staff.tech ?? 0);
-      for (const r of ROOMS) {
-        const st = this.roomStats[r.id];
-        if (!st || !s.rooms[r.id].some(Boolean)) continue;
-        const ratio = st.heat / st.limit;
-        let cond = (s.cond[r.id] ?? 100) - 0.03 * (0.4 + ratio * ratio) * techF * st.wear * dt;
-        if (cond < 60 && (s.staff.tech ?? 0) > 0) cond += 0.4 * (s.staff.tech ?? 0) * dt;
-        s.cond[r.id] = Math.min(100, Math.max(0, cond));
-      }
-    }
+    if (running) this.applyWear(dt);
 
     if (s.researching && Date.now() >= s.researching.end) this.finishResearch();
 
@@ -796,6 +806,23 @@ export class Game {
     if (this.saveTimer >= 5) {
       this.saveTimer = 0;
       this.save();
+    }
+  }
+
+  private applyWear(dt: number) {
+    const s = this.s;
+    // Verschleiß
+    if (dt > 0 && this.grid.throttle > 0) {
+      this.ops.train(dt);
+      const techF = 1 - 0.3 * (s.staff.tech ?? 0);
+      for (const r of ROOMS) {
+        const st = this.roomStats[r.id];
+        if (!st || !s.rooms[r.id].some(Boolean)) continue;
+        const ratio = st.heat / st.limit;
+        let cond = (s.cond[r.id] ?? 100) - 0.03 * (0.4 + ratio * ratio) * techF * st.wear * dt;
+        if (cond < 60 && (s.staff.tech ?? 0) > 0) cond += 0.4 * (s.staff.tech ?? 0) * dt;
+        s.cond[r.id] = Math.min(100, Math.max(0, cond));
+      }
     }
   }
 
@@ -1683,7 +1710,7 @@ export class Game {
   private fresh(): SaveData {
     const starter: Machine = { id: 'm1', name: 'Alter Familien-PC', build: cloneBuild(STARTER_PC) };
     return {
-      v: 3, ops: restoreOperations(), boosts: {}, cash: 350, wallet: {}, staked: {}, soldEur: 0, minedTotal: 0, bought: 0, playSec: 0,
+      v: 3, release: SAVE_RELEASE, ops: restoreOperations(), boosts: {}, cash: 350, wallet: {}, staked: {}, soldEur: 0, minedTotal: 0, bought: 0, playSec: 0,
       machines: { m1: starter }, parts: {}, blueprints: [], draft: emptyBuild(), mid: 2, addr: makeAddr(), nick: '',
       rooms: { kid: ['m1', null] }, cond: { kid: 100 }, roomCoin: { kid: 'MON' }, upgrades: {}, staff: {},
       research: [], researching: null, debt: 0, insured: false, mode: 'pool', autoSell: { on: false, min: 100 },
@@ -1698,7 +1725,8 @@ export class Game {
     try {
       const raw = localStorage.getItem(slotKey(this.slot));
       if (!raw) return null;
-      return this.migrate(JSON.parse(raw));
+      const data = JSON.parse(raw);
+      return data?.release === SAVE_RELEASE ? this.migrate(data) : null;
     } catch {
       return null;
     }
@@ -1788,7 +1816,7 @@ export class Game {
   private noSave = false;
 
   save() {
-    if (this.noSave) return;
+    if (this.noSave || this.paused || this.offlineBatch) return;
     this.s.savedAt = Date.now();
     try {
       localStorage.setItem(slotKey(this.slot), JSON.stringify(this.s));
@@ -1803,7 +1831,7 @@ export class Game {
     return btoa(Array.from(data, (byte) => String.fromCharCode(byte)).join(''));
   }
 
-  importSave(code: string): boolean {
+  importSave(code: string): 'invalid' | 'wrong-release' | 'loaded' {
     try {
       const raw = atob(code.trim());
       let d: unknown;
@@ -1813,13 +1841,16 @@ export class Game {
       } catch {
         d = JSON.parse(raw);
       }
-      if (!this.migrate(d as Record<string, unknown>)) return false;
-      localStorage.setItem(slotKey(this.slot), JSON.stringify(d));
+      if (!d || typeof d !== 'object' || !('v' in d)) return 'invalid';
+      if (!('release' in d) || d.release !== SAVE_RELEASE) return 'wrong-release';
+      const save = this.migrate(d as Record<string, unknown>);
+      if (!save) return 'invalid';
+      localStorage.setItem(slotKey(this.slot), JSON.stringify(save));
       this.noSave = true;
       location.reload();
-      return true;
+      return 'loaded';
     } catch {
-      return false;
+      return 'invalid';
     }
   }
 
@@ -1846,26 +1877,89 @@ export class Game {
     location.reload();
   }
 
-  /** Ertrag für die Zeit seit dem letzten Speichern (max. 2 h, halbe Produktionszeit, Zinsen max. 30 min). */
-  private applyOffline() {
+  pauseForOffline() {
+    if (this.paused) return;
+    this.save();
+    this.paused = true;
+  }
+
+  resumeOffline(): OfflineReport | null {
+    if (!this.paused || this.noSave) return null;
+    this.paused = false;
+    return this.applyOffline();
+  }
+
+  private applyOffline(): OfflineReport | null {
     const s = this.s;
-    const elapsed = Math.min(Math.max(0, (Date.now() - s.savedAt) / 1000), OFFLINE_CAP);
-    if (elapsed < 30) return;
-    this.offlineEur = 0;
-    const cost = this.costPerSec();
-    const productionTime = elapsed * 0.5;
-    const miningTime = this.running() ? Math.min(productionTime, cost > 0 ? s.cash / cost : productionTime) : 0;
-    if (miningTime > 0) {
-      for (const c in this.rate) {
-        const gain = this.rate[c] * miningTime * this.modeFactor();
-        this.credit(c, gain);
-        this.offlineGain += gain;
-        this.offlineEur += gain * this.prices[c];
+    const now = Date.now();
+    const elapsed = (now - s.savedAt) / 1000;
+    if (!Number.isFinite(elapsed) || elapsed < 30) return null;
+
+    const report: OfflineReport = { elapsed, miningTime: 0, coins: {}, sold: 0, costs: 0, notices: [] };
+    const budget = Math.min(elapsed, OFFLINE_CAP) * 0.5;
+    const start = now - Math.min(elapsed, OFFLINE_CAP) * 1000;
+    const soldBefore = s.soldEur;
+    const finishResearchAt = (at: number) => {
+      if (!s.researching || s.researching.end > at) return;
+      report.research = techDef(s.researching.id)?.name;
+      if (report.research) this.finishResearch();
+    };
+
+    this.offlineBatch = report;
+    try {
+      for (let time = 0; time < budget;) {
+        const at = start + time * 2000;
+        finishResearchAt(at);
+        if (s.ev && s.ev.until <= s.playSec + 1e-6) s.ev = null;
+        this.recalc();
+        const power = this.gridCostPerSec();
+        const cost = this.costPerSec();
+        // Divide time at known transitions so brief effects cannot last a whole step.
+        const untilEvent = s.ev ? s.ev.until - s.playSec : Infinity;
+        const untilResearch = s.researching && s.researching.end > at + 1
+          ? (s.researching.end - at) / 2000 : Infinity;
+        const boosts = Object.values(s.boosts).map((end) => end - s.playSec);
+        const effects = Object.values(s.ops.effects).map((end) => end - s.ops.clock);
+        const timers = [...boosts, ...effects].filter((remaining) => remaining > 1e-6);
+        const untilDay = this.ops.day * DAY_SECONDS - s.ops.clock;
+        const step = Math.min(OFFLINE_STEP, budget - time, untilEvent, untilResearch, untilDay > 1e-6 ? untilDay : OFFLINE_STEP, ...timers);
+        const funded = cost > 0 ? Math.max(0, s.cash) / cost : step;
+        const paidTime = Math.min(step, funded);
+        const miningTime = this.running() && this.incomeEurPerSec > 0 ? paidTime : 0;
+        for (const [id, rate] of Object.entries(this.rate)) {
+          const amount = rate * miningTime * this.modeFactor();
+          if (amount <= 0) continue;
+          this.credit(id, amount);
+          report.coins[id] = (report.coins[id] ?? 0) + amount;
+        }
+        if (this.running()) this.ops.updateGrid(paidTime, this.grid);
+        this.applyWear(miningTime);
+        this.ops.chargeOperations(cost * paidTime);
+        s.stats.powerSpent += power * paidTime;
+        s.stats.rentPaid += this.rentPerSec * paidTime;
+        s.stats.salaryPaid += this.salaryPerSec * paidTime;
+        report.costs += cost * paidTime;
+        report.miningTime += miningTime;
+        this.autoSell();
+        s.playSec += step;
+        this.ops.advance(step);
+        time = Math.min(budget, time + step);
       }
+      if (s.ev && s.ev.until <= s.playSec) s.ev = null;
+      finishResearchAt(now);
+      const interest = s.debt * LOAN_RATE * Math.min(elapsed, 1800);
+      s.debt += interest;
+      s.stats.interestPaid += interest;
+      for (const c of COINS) {
+        const staked = s.staked[c.id] ?? 0;
+        if (staked > 0) s.staked[c.id] = staked * Math.exp(STAKE_RATE * budget);
+      }
+      report.sold = s.soldEur - soldBefore;
+    } finally {
+      this.offlineBatch = null;
     }
-    this.ops.chargeOperations(cost * miningTime);
-    s.debt += s.debt * LOAN_RATE * Math.min(elapsed, 1800);
-    s.savedAt = Date.now();
+    this.afterChange();
+    return report;
   }
 }
 

@@ -7,8 +7,19 @@ import { DPR } from './env';
 
 (window as unknown as { __game: typeof game }).__game = game;
 const hud = new HUD();
-if (game.offlineEur > 0) hud.toast(`Offline-Ertrag: ca. ${Math.round(game.offlineEur)} € (${game.offlineGain.toFixed(3)} Coins)`);
-window.addEventListener('beforeunload', () => game.save());
+if (game.offlineReport) hud.showOfflineReport(game.offlineReport);
+const syncVisibility = () => {
+  if (document.hidden) {
+    game.pauseForOffline();
+  } else {
+    const report = game.resumeOffline();
+    if (report) hud.showOfflineReport(report);
+  }
+};
+document.addEventListener('visibilitychange', syncVisibility);
+window.addEventListener('pagehide', () => game.pauseForOffline());
+window.addEventListener('pageshow', syncVisibility);
+syncVisibility();
 window.addEventListener('pointerdown', () => sfx.unlock(), { once: true });
 
 const phaser = new Phaser.Game({

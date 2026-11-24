@@ -1,5 +1,8 @@
-const SAVE_KEY = 'cryptoforge.save.v1';
-const ACTIVE_SLOT = 'cryptoforge.active-slot';
+declare const __SAVE_RELEASE__: string;
+export const SAVE_RELEASE = __SAVE_RELEASE__;
+const LEGACY_KEY = 'cryptoforge.save.v1';
+const SAVE_KEY = `${LEGACY_KEY}.release.${SAVE_RELEASE}`;
+const ACTIVE_SLOT = `cryptoforge.active-slot.${SAVE_RELEASE}`;
 export const SAVE_SLOTS = [1, 2, 3] as const;
 export type SaveSlot = typeof SAVE_SLOTS[number];
 
@@ -27,5 +30,16 @@ export function slotPreview(slot: SaveSlot): { nick: string; cash: number } | nu
     return { nick: typeof value.nick === 'string' ? value.nick : '', cash: Number.isFinite(value.cash) ? value.cash : 0 };
   } catch {
     return null;
+  }
+}
+
+export function hasPreviousSaves(): boolean {
+  try {
+    const currentSlots = new Set(SAVE_SLOTS.map(slotKey));
+    const keys = Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index));
+    return !keys.some((key) => key !== null && currentSlots.has(key))
+      && keys.some((key) => key === LEGACY_KEY || key?.startsWith(`${LEGACY_KEY}.`));
+  } catch {
+    return false;
   }
 }
