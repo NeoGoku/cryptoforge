@@ -168,7 +168,8 @@
   body.noscene .bar { flex-wrap: wrap; }
   body.noscene .sell, body.noscene .clicker { width: 100%; }
   body.noscene .odm { flex: 1; }
-  body.noscene .roomrow, body.noscene .coinrow { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+  body.noscene .roomrow { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+  body.noscene .coinrow { flex-wrap: wrap; overflow: visible; }
   body.noscene .roomrow .chip { white-space: nowrap; }
   #boosts { display: flex; gap: 6px; flex-wrap: wrap; }
   #boosts:empty { display: none; }
@@ -352,8 +353,12 @@
     .odm { flex: 1; width: auto; }
     body.noscene #dock { width: auto; right: 6px; top: var(--hud-start, 124px); bottom: auto; }
     body.noscene #panel { left: 6px; height: auto; }
-    .roomrow, .coinrow { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+    .roomrow { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+    .coinrow { flex-wrap: wrap; overflow: visible; }
     .roomrow .chip { white-space: nowrap; padding: 5px 10px; font-size: 12px; }
+    .coinrow { display: grid; grid-template-columns: repeat(auto-fit, minmax(70px, 1fr)); align-items: stretch; }
+    .coinrow > span { grid-column: 1 / -1; }
+    .coinrow button { min-height: 40px; width: 100%; padding: 6px 8px; font-size: 11px; white-space: nowrap; }
     .boost { min-width: 0; font-size: 11px; padding: 4px 8px; }
     #tab-toggle { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 4px; min-height: 40px; flex: none; text-align: left; }
     #tab-toggle span { color: var(--acc); }
